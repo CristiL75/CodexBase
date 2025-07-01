@@ -17,37 +17,119 @@ import {
   Grid,
   GridItem,
 } from '@chakra-ui/react';
-import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { login, loading, error, needs2FAVerification } = useAuth();
+  const [twoFACode, setTwoFACode] = useState('');
+  const [show2FA, setShow2FA] = useState(false);
+  const [tempToken, setTempToken] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
 
   // Culori dinamice pentru tema light/dark
   const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
   const pageBg = useColorModeValue('gray.50', 'gray.900');
 
+  // Login normal (email + parolă)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setLoading(true);
+
     try {
       if (!email || !email.includes('@')) {
-        throw new Error('Please enter a valid email');
-      }
-      if (!password || password.length < 6) {
-        throw new Error('Password must be at least 6 characters');
-      }
-      await login(email, password);
-      if (needs2FAVerification) {
-        navigate('/2fa-verify');
+        setError('Please enter a valid email');
+        setLoading(false);
         return;
       }
-      navigate('/');
+      if (!password || password.length < 6) {
+        setError('Password must be at least 6 characters');
+        setLoading(false);
+        return;
+      }
+
+      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const res = await fetch(`${apiBaseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.message || 'Login failed');
+        setLoading(false);
+        return;
+      }
+
+      // Dacă backend-ul cere 2FA, setează tokenul și arată formularul de cod
+      if (data.require2FA || data.require2FASetup) {
+        setShow2FA(true);
+        setTempToken(data.tempToken);
+        setLoading(false);
+        return;
+      }
+
+      // Dacă login-ul e complet fără 2FA, salvează tokenul și navighează
+      if (data.token) {
+        localStorage.setItem('token', data.token);
+        navigate('/');
+        setLoading(false);
+        return;
+      }
+
+      setError('Unexpected response from server');
+      setLoading(false);
     } catch (err) {
-      console.error('Login failed:', err);
+      setError('Login failed');
+      setLoading(false);
+    }
+  };
+
+  // Trimite codul 2FA la backend
+  const handle2FAVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (!tempToken) {
+        setError('Token missing. Please re-login.');
+        setLoading(false);
+        return;
+      }
+      if (!twoFACode || twoFACode.length !== 6) {
+        setError('Please enter a valid 6-digit 2FA code');
+        setLoading(false);
+        return;
+      }
+      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const res = await fetch(`${apiBaseUrl}/auth/2fa/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tempToken}`,
+        },
+        body: JSON.stringify({ token: twoFACode }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.token) {
+        localStorage.setItem('token', data.token);
+        navigate('/');
+      } else if (res.ok && data.success) {
+        navigate('/');
+      } else {
+        setError(data.message || 'Invalid 2FA code');
+      }
+      setLoading(false);
+    } catch (err) {
+      setError('2FA verification failed');
+      setLoading(false);
     }
   };
 
@@ -66,7 +148,6 @@ const LoginPage: React.FC = () => {
             alignItems="stretch"
             h={{ base: 'auto', md: '70vh' }}
           >
-            {/* Login Form */}
             <GridItem
               bg={bgColor}
               borderRight="none"
@@ -87,54 +168,95 @@ const LoginPage: React.FC = () => {
                       {error}
                     </Alert>
                   )}
-                  <form onSubmit={handleSubmit}>
-                    <VStack spacing={6} align="stretch">
-                      <FormControl isRequired>
-                        <FormLabel fontSize="lg">Email</FormLabel>
-                        <Input
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="youremail@example.com"
-                          focusBorderColor="blue.400"
+
+                  {!show2FA ? (
+                    <form onSubmit={handleSubmit}>
+                      <VStack spacing={6} align="stretch">
+                        <FormControl isRequired>
+                          <FormLabel fontSize="lg">Email</FormLabel>
+                          <Input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="youremail@example.com"
+                            focusBorderColor="blue.400"
+                            size="lg"
+                            height="56px"
+                            fontSize="md"
+                          />
+                        </FormControl>
+                        <FormControl isRequired>
+                          <FormLabel fontSize="lg">Password</FormLabel>
+                          <Input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter your password"
+                            focusBorderColor="blue.400"
+                            size="lg"
+                            height="56px"
+                            fontSize="md"
+                          />
+                        </FormControl>
+                        <Button
+                          colorScheme="blue"
+                          type="submit"
+                          width="100%"
                           size="lg"
+                          isLoading={loading}
+                          mt={4}
                           height="56px"
-                          fontSize="md"
-                        />
-                      </FormControl>
-                      <FormControl isRequired>
-                        <FormLabel fontSize="lg">Password</FormLabel>
-                        <Input
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Enter your password"
-                          focusBorderColor="blue.400"
+                          fontSize="lg"
+                          _hover={{
+                            bg: 'blue.500',
+                            transform: 'translateY(-2px)',
+                            boxShadow: 'lg',
+                          }}
+                          transition="all 0.2s"
+                        >
+                          Login
+                        </Button>
+                      </VStack>
+                    </form>
+                  ) : (
+                    <form onSubmit={handle2FAVerify}>
+                      <VStack spacing={6} align="stretch">
+                        <FormControl isRequired>
+                          <FormLabel fontSize="lg">2FA Code</FormLabel>
+                          <Input
+                            type="text"
+                            value={twoFACode}
+                            onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder="Enter 2FA code"
+                            focusBorderColor="blue.400"
+                            size="lg"
+                            height="56px"
+                            fontSize="md"
+                            maxLength={6}
+                          />
+                        </FormControl>
+                        <Button
+                          colorScheme="blue"
+                          type="submit"
+                          width="100%"
                           size="lg"
+                          isLoading={loading}
+                          mt={4}
                           height="56px"
-                          fontSize="md"
-                        />
-                      </FormControl>
-                      <Button
-                        colorScheme="blue"
-                        type="submit"
-                        width="100%"
-                        size="lg"
-                        isLoading={loading}
-                        mt={4}
-                        height="56px"
-                        fontSize="lg"
-                        _hover={{
-                          bg: 'blue.500',
-                          transform: 'translateY(-2px)',
-                          boxShadow: 'lg',
-                        }}
-                        transition="all 0.2s"
-                      >
-                        Login
-                      </Button>
-                    </VStack>
-                  </form>
+                          fontSize="lg"
+                          _hover={{
+                            bg: 'blue.500',
+                            transform: 'translateY(-2px)',
+                            boxShadow: 'lg',
+                          }}
+                          transition="all 0.2s"
+                        >
+                          Verify 2FA
+                        </Button>
+                      </VStack>
+                    </form>
+                  )}
+
                   <Divider />
                   <Button
                     onClick={handleGoogleLogin}

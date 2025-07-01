@@ -65,18 +65,20 @@ router.post(
         name,
         passwordHash,
         authMethod: "local",
+        is2FAEnabled: false,
       });
 
-      const token = jwt.sign(
-        { id: newUser._id, email: newUser.email, is2FAEnabled: newUser.is2FAEnabled },
+      // Generează JWT temporar pentru setup 2FA
+      const tempToken = jwt.sign(
+        { id: newUser._id, email: newUser.email, is2FAEnabled: false, twoFAPending: true },
         process.env.JWT_SECRET!,
-        { expiresIn: "7d" }
+        { expiresIn: "14h" }
       );
 
-      newUser.jwtToken = token;
+      newUser.jwtToken = tempToken;
       await newUser.save();
 
-      res.json({ token });
+      res.json({ require2FASetup: true, tempToken });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
@@ -102,16 +104,24 @@ router.post(
       const isMatch = await bcrypt.compare(password, user.passwordHash!);
       if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-      const token = jwt.sign(
-        { id: user._id, email: user.email, is2FAEnabled: user.is2FAEnabled },
+      // Dacă userul are 2FA activat, cere codul 2FA
+      if (user.is2FAEnabled) {
+        // Generează un JWT temporar DOAR pentru 2FA
+        const tempToken = jwt.sign(
+          { id: user._id, email: user.email, is2FAEnabled: true, twoFAPending: true },
+          process.env.JWT_SECRET!,
+          { expiresIn: "14h" }
+        );
+        return res.json({ require2FA: true, tempToken });
+      }
+
+      // Dacă nu are 2FA, forțează setup 2FA
+      const tempToken = jwt.sign(
+        { id: user._id, email: user.email, is2FAEnabled: false, twoFAPending: true },
         process.env.JWT_SECRET!,
-        { expiresIn: "7d" }
+        { expiresIn: "10m" }
       );
-
-      user.jwtToken = token;
-      await user.save();
-
-      res.json({ token });
+      return res.json({ require2FASetup: true, tempToken });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
@@ -124,11 +134,20 @@ export const authenticateJWT = (req: any, res: any, next: any) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ message: "Missing auth token" });
 
+  // Verifică dacă headerul începe cu "Bearer "
+  if (!authHeader) return res.status(401).json({ message: "Missing auth token" });
+if (!authHeader.startsWith("Bearer ")) {
+  console.log('Invalid auth header:', authHeader);
+  return res.status(401).json({ message: "Invalid auth header" });
+}
   const token = authHeader.split(" ")[1];
   if (!token) return res.status(401).json({ message: "Invalid auth header" });
 
   jwt.verify(token, process.env.JWT_SECRET!, (err: any, user: any) => {
-    if (err) return res.status(403).json({ message: "Invalid token" });
+    if (err) {
+      console.error('JWT verify error:', err);
+      return res.status(403).json({ message: "Invalid token" });
+    }
     req.user = user;
     next();
   });
@@ -141,17 +160,31 @@ import qrcode from "qrcode";
 // Generare secret + QR code pentru 2FA setup
 router.post("/2fa/setup", authenticateJWT, async (req: any, res) => {
   try {
-    const secret = speakeasy.generateSecret({
-      name: `CodexBase (${req.user.email})`,
+    let user = await User.findById(req.user.id);
+    console.log('HEADER:', req.headers.authorization);
+
+    // Dacă userul are deja secret, nu genera altul!
+    let secret;
+    if (user.twoFASecret) {
+      secret = { base32: user.twoFASecret };
+    } else {
+      secret = speakeasy.generateSecret({
+        name: `CodexBase (${user.email})`,
+      });
+      await User.findByIdAndUpdate(req.user.id, { twoFASecret: secret.base32 });
+    }
+
+    // Generează otpauth_url pentru QR code
+    const otpauth_url = speakeasy.otpauthURL({
+      secret: secret.base32,
+      label: `CodexBase (${user.email})`,
+      issuer: 'CodexBase',
+      encoding: 'base32'
     });
 
-    // Salvează secret temporar în DB, fără activa 2FA încă
-    await User.findByIdAndUpdate(req.user.id, { twoFASecret: secret.base32 });
+    const qrCodeUrl = await qrcode.toDataURL(otpauth_url);
 
-    // Generează QR code data URL
-    const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url!);
-
-    res.json({ qrCodeUrl, secret: secret.base32 });
+    res.json({ qrCode: qrCodeUrl, secret: secret.base32 });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to generate 2FA secret" });
@@ -165,7 +198,9 @@ router.post(
   authenticateJWT,
   body("token").isLength({ min: 6, max: 6 }),
   async (req: any, res) => {
+           console.log('BODY:', req.body, 'HEADER:', req.headers.authorization);
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { token } = req.body;
@@ -184,11 +219,23 @@ router.post(
 
       if (!verified) return res.status(400).json({ message: "Invalid 2FA token" });
 
-      // Activează 2FA definitiv
-      user.is2FAEnabled = true;
+      // Activează 2FA dacă nu era deja activat
+      if (!user.is2FAEnabled) {
+        user.is2FAEnabled = true;
+        await user.save();
+      }
+
+      // Generează token JWT complet pentru sesiune
+      const jwtToken = jwt.sign(
+        { id: user._id, email: user.email, is2FAEnabled: true },
+        process.env.JWT_SECRET!,
+        { expiresIn: "7d" }
+      );
+      user.jwtToken = jwtToken;
       await user.save();
 
-      res.json({ message: "2FA enabled successfully" });
+      // Returnează tokenul pentru frontend
+      res.json({ success: true, message: "2FA enabled successfully", token: jwtToken });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "2FA verification failed" });
