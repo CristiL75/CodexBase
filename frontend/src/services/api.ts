@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // URL de bază API
-const API_URL = 'http://localhost:3000/api';
+const API_URL = 'http://localhost:5000/api';
 
 // Configurare axios
 export const api = axios.create({

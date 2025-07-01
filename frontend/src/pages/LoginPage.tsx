@@ -18,6 +18,8 @@ import {
   GridItem,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
+// Dacă ai context de autentificare, decomentează linia de mai jos
+// import { useAuth } from '../context/AuthContext';
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -28,7 +30,13 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Pentru regenerare QR
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [showQR, setShowQR] = useState(false);
+
   const navigate = useNavigate();
+  // Dacă ai context de autentificare, decomentează linia de mai jos
+  // const { setToken } = useAuth();
 
   // Culori dinamice pentru tema light/dark
   const bgColor = useColorModeValue('white', 'gray.800');
@@ -77,6 +85,8 @@ const LoginPage: React.FC = () => {
       // Dacă login-ul e complet fără 2FA, salvează tokenul și navighează
       if (data.token) {
         localStorage.setItem('token', data.token);
+        // Dacă ai context de autentificare, decomentează linia de mai jos
+        // setToken(data.token);
         navigate('/');
         setLoading(false);
         return;
@@ -120,6 +130,8 @@ const LoginPage: React.FC = () => {
 
       if (res.ok && data.token) {
         localStorage.setItem('token', data.token);
+        // Dacă ai context de autentificare, decomentează linia de mai jos
+        // setToken(data.token);
         navigate('/');
       } else if (res.ok && data.success) {
         navigate('/');
@@ -132,6 +144,39 @@ const LoginPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Regenerare QR pentru 2FA
+  const handleRegenerate2FAQr = async () => {
+  setError('');
+  setLoading(true);
+  try {
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const token = localStorage.getItem('token') || tempToken;
+    if (!token) {
+      setError('You must be logged in or have a valid session.');
+      setLoading(false);
+      return;
+    }
+    const res = await fetch(`${apiBaseUrl}/auth/2fa/setup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    const data = await res.json();
+    // Folosește cheia corectă din backend: qrCode
+    if (res.ok && data.qrCode) {
+      setQrUrl(data.qrCode);
+      setShowQR(true);
+    } else {
+      setError(data.message || 'Could not generate QR code');
+    }
+  } catch {
+    setError('Could not generate QR code');
+  }
+  setLoading(false);
+};
 
   const handleGoogleLogin = () => {
     const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -219,42 +264,59 @@ const LoginPage: React.FC = () => {
                       </VStack>
                     </form>
                   ) : (
-                    <form onSubmit={handle2FAVerify}>
-                      <VStack spacing={6} align="stretch">
-                        <FormControl isRequired>
-                          <FormLabel fontSize="lg">2FA Code</FormLabel>
-                          <Input
-                            type="text"
-                            value={twoFACode}
-                            onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                            placeholder="Enter 2FA code"
-                            focusBorderColor="blue.400"
+                    <>
+                      <form onSubmit={handle2FAVerify}>
+                        <VStack spacing={6} align="stretch">
+                          <FormControl isRequired>
+                            <FormLabel fontSize="lg">2FA Code</FormLabel>
+                            <Input
+                              type="text"
+                              value={twoFACode}
+                              onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="Enter 2FA code"
+                              focusBorderColor="blue.400"
+                              size="lg"
+                              height="56px"
+                              fontSize="md"
+                              maxLength={6}
+                            />
+                          </FormControl>
+                          <Button
+                            colorScheme="blue"
+                            type="submit"
+                            width="100%"
                             size="lg"
+                            isLoading={loading}
+                            mt={4}
                             height="56px"
-                            fontSize="md"
-                            maxLength={6}
-                          />
-                        </FormControl>
-                        <Button
-                          colorScheme="blue"
-                          type="submit"
-                          width="100%"
-                          size="lg"
-                          isLoading={loading}
-                          mt={4}
-                          height="56px"
-                          fontSize="lg"
-                          _hover={{
-                            bg: 'blue.500',
-                            transform: 'translateY(-2px)',
-                            boxShadow: 'lg',
-                          }}
-                          transition="all 0.2s"
-                        >
-                          Verify 2FA
-                        </Button>
-                      </VStack>
-                    </form>
+                            fontSize="lg"
+                            _hover={{
+                              bg: 'blue.500',
+                              transform: 'translateY(-2px)',
+                              boxShadow: 'lg',
+                            }}
+                            transition="all 0.2s"
+                          >
+                            Verify 2FA
+                          </Button>
+                        </VStack>
+                      </form>
+                      <Button
+                        colorScheme="orange"
+                        variant="outline"
+                        onClick={handleRegenerate2FAQr}
+                        isLoading={loading}
+                        mt={4}
+                      >
+                        Regenerate 2FA QR Code
+                      </Button>
+                      {showQR && qrUrl && (
+                        <Box textAlign="center" mt={4}>
+                          <Text mb={2}>Scan this QR code with your authenticator app:</Text>
+                          <img src={qrUrl} alt="2FA QR Code" style={{ margin: '0 auto', maxWidth: 200 }} />
+                        </Box>
+                      )}
+                    </>
                   )}
 
                   <Divider />

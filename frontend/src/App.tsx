@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ChakraProvider } from '@chakra-ui/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import RepositoryViewPage from './pages/RepositoryViewPage';
+import StarredRepositoriesPage from './pages/StarredRepositoriesPage';
 
 // Componente
 import Navbar from './components/Navbar';
@@ -13,13 +15,18 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import TwoFASetup from './pages/TwoFASetup';
 import TwoFAVerify from './pages/TwoFAVerify';
+import ProfilePage from './pages/ProfilePage';
+import NewRepositoryPage from './pages/NewRepositoryPage';
+import RepositoriesPage from './pages/RepositoriesPage';
+import NotificationsPage from './pages/NotificationsPage';
+
 
 function App() {
   return (
     <ChakraProvider>
       <AuthProvider>
         <Router>
-          <Navbar />
+          <ConditionalNavbar />
           <Routes>
             {/* Rute publice */}
             <Route path="/login" element={<LoginPage />} />
@@ -31,6 +38,12 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<HomePage />} />
               <Route path="/2fa-setup" element={<TwoFASetup />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/new-repo" element={<NewRepositoryPage />} />
+              <Route path="/repositories" element={<RepositoriesPage />} />
+              <Route path="/repository/:repoId" element={<RepositoryViewPage />} />
+              <Route path="/stars" element={<StarredRepositoriesPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
             </Route>
             
             {/* Rută implicită - redirecționează spre login */}
@@ -41,6 +54,12 @@ function App() {
     </ChakraProvider>
   );
 }
+
+// Navbar-ul apare doar dacă utilizatorul este logat
+const ConditionalNavbar: React.FC = () => {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <Navbar /> : null;
+};
 
 // Componenta pentru callback OAuth
 const AuthCallback: React.FC = () => {

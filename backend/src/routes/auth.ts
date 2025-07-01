@@ -163,16 +163,15 @@ router.post("/2fa/setup", authenticateJWT, async (req: any, res) => {
     let user = await User.findById(req.user.id);
     console.log('HEADER:', req.headers.authorization);
 
-    // Dacă userul are deja secret, nu genera altul!
-    let secret;
-    if (user.twoFASecret) {
-      secret = { base32: user.twoFASecret };
-    } else {
-      secret = speakeasy.generateSecret({
-        name: `CodexBase (${user.email})`,
-      });
-      await User.findByIdAndUpdate(req.user.id, { twoFASecret: secret.base32 });
-    }
+    // Forțează generarea unui secret nou de fiecare dată
+    const secret = speakeasy.generateSecret({
+      name: `CodexBase (${user.email})`,
+    });
+
+    // Salvează noul secret și dezactivează 2FA până la verificare
+    user.twoFASecret = secret.base32;
+    user.is2FAEnabled = false;
+    await user.save();
 
     // Generează otpauth_url pentru QR code
     const otpauth_url = speakeasy.otpauthURL({
@@ -190,7 +189,6 @@ router.post("/2fa/setup", authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Failed to generate 2FA secret" });
   }
 });
-
 
 // Confirmare cod 2FA + activare
 router.post(
