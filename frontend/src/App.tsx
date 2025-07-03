@@ -4,6 +4,7 @@ import { ChakraProvider } from '@chakra-ui/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import RepositoryViewPage from './pages/RepositoryViewPage';
 import StarredRepositoriesPage from './pages/StarredRepositoriesPage';
+import UserProfilePage from './pages/UserProfilePage';
 
 // Componente
 import Navbar from './components/Navbar';
@@ -44,6 +45,7 @@ function App() {
               <Route path="/repository/:repoId" element={<RepositoryViewPage />} />
               <Route path="/stars" element={<StarredRepositoriesPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/profile/:userId" element={<UserProfilePage />} />
             </Route>
             
             {/* Rută implicită - redirecționează spre login */}
