@@ -3,7 +3,8 @@ import { authenticateJWT } from "./auth"; // sau importă corect dacă e în alt
 import { User } from "../models/User";
 import { Repository } from '../models/Repository';
 import { FollowNotification } from "../models/FollowNotification";
-
+import { Commit } from "../models/Commit";
+import mongoose from "mongoose";
 
 const router = express.Router();
 
@@ -38,7 +39,26 @@ router.get('/profile', authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
+router.get('/:userId/activity-calendar', authenticateJWT, async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.params.userId);
+    const activity = await Commit.aggregate([
+      { $match: { author: userId } },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    res.json(activity.map(a => ({ date: a._id, count: a.count })));
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 router.post('/find', authenticateJWT, async (req, res) => {
   const { query } = req.body;
   if (!query || typeof query !== 'string' || query.length < 2) {
@@ -91,6 +111,17 @@ router.get('/:userId', async (req, res) => {
   }
 });
 
+router.get('/:userId/commits', authenticateJWT, async (req, res) => {
+  try {
+    const commits = await Commit.find({ author: req.params.userId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('repository', 'name');
+    res.json({ commits });
+  } catch {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 router.post('/:userId/follow', authenticateJWT, async (req: any, res) => {
   try {

@@ -5,7 +5,7 @@ import { Repository } from "../models/Repository";
 import { User } from "../models/User";
 import { File } from "../models/File";
 import { Invitation } from '../models/Invitation';
-
+import { Commit } from "../models/Commit";
 
 
 const router = express.Router();
@@ -166,4 +166,89 @@ router.delete("/:repoId", authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
+
+router.post("/:repoId/commit", authenticateJWT, async (req: any, res) => {
+  try {
+    const { message, files } = req.body; // files: [{name, content}]
+    const repoId = req.params.repoId;
+
+    // Creează/actualizează fișierele în colecția File
+    for (const file of files) {
+      await File.findOneAndUpdate(
+        { repository: repoId, name: file.name },
+        {
+          $set: {
+            content: file.content,
+            author: req.user.id,
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    // Creează commit-ul
+    const commit = await Commit.create({
+      repository: repoId,
+      author: req.user.id,
+      message,
+      files,
+    });
+    res.status(201).json(commit);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/:repoId/commits", authenticateJWT, async (req, res) => {
+  try {
+    const commits = await Commit.find({ repository: req.params.repoId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('author', 'name email');
+    res.json(commits);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/:repoId/clone", authenticateJWT, async (req, res) => {
+  try {
+    const files = await File.find({ repository: req.params.repoId });
+    const commits = await Commit.find({ repository: req.params.repoId }).sort({ createdAt: 1 });
+    res.json({ files, commits });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/:repoId/pull", authenticateJWT, async (req, res) => {
+  try {
+    const repoId = req.params.repoId;
+    // Poți trimite un parametru ?since=<hash> ca să primești doar commit-urile noi
+    const sinceHash = req.query.since as string | undefined;
+
+    let commits;
+    if (sinceHash) {
+      // Găsește commit-ul cu hash-ul respectiv și returnează doar cele mai noi
+      const sinceCommit = await Commit.findOne({ repository: repoId, hash: sinceHash });
+      if (!sinceCommit) return res.status(404).json({ message: "Commit not found" });
+      commits = await Commit.find({
+        repository: repoId,
+        createdAt: { $gt: sinceCommit.createdAt }
+      }).sort({ createdAt: 1 });
+    } else {
+      // Toate commit-urile
+      commits = await Commit.find({ repository: repoId }).sort({ createdAt: 1 });
+    }
+
+    const files = await File.find({ repository: repoId });
+    res.json({ commits, files });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 export default router;

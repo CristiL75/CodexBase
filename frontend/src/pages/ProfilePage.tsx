@@ -26,8 +26,10 @@ import {
   ListItem,
   Link as ChakraLink,
   useDisclosure,
+  Code,
+  Tooltip,
 } from '@chakra-ui/react';
-import { FaUserFriends, FaStar, FaCodeBranch, FaCalendarAlt, FaUserShield } from 'react-icons/fa';
+import { FaUserFriends, FaStar, FaCodeBranch, FaCalendarAlt, FaUserShield, FaClock } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
 const ProfilePage: React.FC = () => {
@@ -37,6 +39,9 @@ const ProfilePage: React.FC = () => {
   const [followingList, setFollowingList] = useState<any[]>([]);
   const [followersLoading, setFollowersLoading] = useState(false);
   const [followingLoading, setFollowingLoading] = useState(false);
+  const [recentCommits, setRecentCommits] = useState<any[]>([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [activityData, setActivityData] = useState<{ date: string, count: number }[]>([]);
   const cardBg = useColorModeValue('white', 'gray.800');
   const cardBorder = useColorModeValue('gray.200', 'gray.700');
   const navigate = useNavigate();
@@ -68,6 +73,46 @@ const ProfilePage: React.FC = () => {
     };
     fetchProfile();
   }, []);
+
+  useEffect(() => {
+    const fetchCommits = async () => {
+      if (!profile || !profile._id) return;
+      setCommitsLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/commits`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        const data = await res.json();
+        setRecentCommits(data.commits || data || []);
+      } catch {
+        setRecentCommits([]);
+      }
+      setCommitsLoading(false);
+    };
+    fetchCommits();
+  }, [profile]);
+
+  useEffect(() => {
+    const fetchActivity = async () => {
+      if (!profile || !profile._id) return;
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/activity-calendar`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json();
+        setActivityData(data);
+      } catch {
+        setActivityData([]);
+      }
+    };
+    fetchActivity();
+  }, [profile]);
 
   const fetchFollowers = async () => {
     if (!profile || !profile._id) return;
@@ -118,6 +163,25 @@ const ProfilePage: React.FC = () => {
     onFollowingOpen();
     fetchFollowing();
   };
+
+  function getColor(count: number) {
+    if (count === 0) return "gray.200";
+    if (count < 2) return "green.100";
+    if (count < 5) return "green.300";
+    if (count < 10) return "green.500";
+    return "green.700";
+  }
+
+  function getLastNDays(n: number) {
+    const days = [];
+    const today = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    return days;
+  }
 
   if (loading) {
     return (
@@ -257,6 +321,73 @@ const ProfilePage: React.FC = () => {
           <b>Total Commits:</b> {profile.commits}
         </Text>
       </VStack>
+
+      {/* Activity Calendar */}
+      <Box mt={10} mb={10} p={6} bg={cardBg} border="1px solid" borderColor={cardBorder} borderRadius="lg" boxShadow="md">
+        <Heading size="md" mb={4}>Activity Calendar</Heading>
+        <Box display="flex" flexWrap="wrap" maxW="360px">
+          {getLastNDays(112).map(date => {
+            const found = activityData.find(d => d.date === date);
+            const count = found ? found.count : 0;
+            return (
+              <Tooltip key={date} label={`${date}: ${count} commit${count !== 1 ? 's' : ''}`}>
+                <Box
+                  w="16px"
+                  h="16px"
+                  m="2px"
+                  borderRadius="sm"
+                  bg={getColor(count)}
+                  border="1px solid"
+                  borderColor="gray.300"
+                  display="inline-block"
+                />
+              </Tooltip>
+            );
+          })}
+        </Box>
+        <Text fontSize="xs" color="gray.500" mt={2}>
+          Last 16 weeks of activity (greener = more commits)
+        </Text>
+      </Box>
+
+      {/* Recent Activity / Commits */}
+      <Box
+        mt={10}
+        mx={{ base: 4, md: 16 }}
+        p={6}
+        bg={cardBg}
+        border="1px solid"
+        borderColor={cardBorder}
+        borderRadius="lg"
+        boxShadow="md"
+      >
+        <Heading size="md" mb={4}>Recent Activity</Heading>
+        {commitsLoading ? (
+          <Spinner />
+        ) : recentCommits.length === 0 ? (
+          <Text color="gray.400">No recent commits.</Text>
+        ) : (
+          <VStack align="stretch" spacing={3}>
+            {recentCommits.slice(0, 10).map((commit) => (
+              <Box key={commit._id} p={3} bg="gray.50" borderRadius="md" borderWidth={1}>
+                <HStack>
+                  <Icon as={FaCodeBranch} color="teal.400" />
+                  <Text fontWeight="bold" fontSize="sm">
+                    {commit.message}
+                  </Text>
+                  <Badge colorScheme="teal" ml={2} fontSize="xs">
+                    {commit.repository?.name || "Repo"}
+                  </Badge>
+                  <Text color="gray.500" fontSize="xs" ml="auto">
+                    <Icon as={FaClock} mr={1} />
+                    {new Date(commit.createdAt).toLocaleString()}
+                  </Text>
+                </HStack>
+              </Box>
+            ))}
+          </VStack>
+        )}
+      </Box>
 
       {/* Followers Modal */}
       <Modal isOpen={isFollowersOpen} onClose={onFollowersClose} size="md">
