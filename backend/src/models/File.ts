@@ -11,6 +11,7 @@ export interface IFile extends Document {
 
 const FileSchema = new Schema<IFile>({
   repository: { type: Schema.Types.ObjectId, ref: "Repository", required: true },
+  branch: { type: String, default: "main" },
   name: { type: String, required: true },
   content: { type: String, default: "" },
   author: { type: Schema.Types.ObjectId, ref: "User", required: true },

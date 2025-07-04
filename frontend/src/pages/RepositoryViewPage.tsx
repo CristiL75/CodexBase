@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Badge, Avatar, List, ListItem, Alert, AlertIcon, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea
+  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea
 } from '@chakra-ui/react';
-import { FaStar, FaRegStar, FaFileAlt, FaTrash, FaTerminal, FaCopy, FaUpload, FaEdit, FaCodeBranch } from 'react-icons/fa';
+import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy } from 'react-icons/fa';
 import { useParams, useNavigate } from 'react-router-dom';
 
 const RepositoryViewPage: React.FC = () => {
@@ -10,14 +10,6 @@ const RepositoryViewPage: React.FC = () => {
   const [repo, setRepo] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [starred, setStarred] = useState(false);
-  const [stars, setStars] = useState(0);
-  const [inviteInput, setInviteInput] = useState('');
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
@@ -27,48 +19,85 @@ const RepositoryViewPage: React.FC = () => {
   const [editingLoading, setEditingLoading] = useState(false);
   const [commits, setCommits] = useState<any[]>([]);
   const [commitsLoading, setCommitsLoading] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState('main');
   const toast = useToast();
-  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Get token for CLI help
+  // Token for CLI
   const token = localStorage.getItem('token');
   const { onCopy, hasCopied } = useClipboard(token || '');
 
-  // Get user id for edit rights
+  // User id for edit rights
   let userId = '';
   try {
     userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
   } catch {}
 
+  // Fetch repo, branches, files, commits
   useEffect(() => {
-    const fetchRepo = async () => {
-      setLoading(true);
+     const fetchRepo = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const allRepos = await res.json();
+      const found = allRepos.find((r: any) => r._id === repoId);
+      setRepo(found);
+    } catch {}
+    setLoading(false);
+  };
+    const fetchBranches = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/branches`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      let data = await res.json();
+      // Always ensure at least 'main' exists
+      if (!Array.isArray(data) || data.length === 0) {
+        data = ['main'];
+      } else if (!data.includes('main')) {
+        data = ['main', ...data];
+      }
+      setBranches(data);
+      if (!data.includes(selectedBranch)) setSelectedBranch('main');
+    } catch {
+      setBranches(['main']);
+      setSelectedBranch('main');
+    }
+  };
+  fetchRepo();
+  fetchBranches();
+  // eslint-disable-next-line
+}, [repoId]);
+
+  // Fetch files and commits when branch changes
+  useEffect(() => {
+    const fetchFiles = async () => {
       try {
         const token = localStorage.getItem('token');
         const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
+          { headers: { Authorization: `Bearer ${token}` } }
         );
-        const allRepos = await res.json();
-        const found = allRepos.find((r: any) => r._id === repoId);
-        setRepo(found);
-        setStarred(found?.isStarred || false);
-        setStars(found?.stars || 0);
-      } catch {}
-      setLoading(false);
+        const data = await res.json();
+        setFiles(data);
+      } catch {
+        setFiles([]);
+      }
     };
     const fetchCommits = async () => {
       setCommitsLoading(true);
       try {
         const token = localStorage.getItem('token');
         const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         const data = await res.json();
         setCommits(data);
@@ -77,22 +106,9 @@ const RepositoryViewPage: React.FC = () => {
       }
       setCommitsLoading(false);
     };
-    const fetchFiles = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setFiles(data);
-      } catch {
-        setFiles([]);
-      }
-    };
-    fetchRepo();
     fetchFiles();
     fetchCommits();
-  }, [repoId]);
+  }, [repoId, selectedBranch]);
 
   // Drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -110,6 +126,41 @@ const RepositoryViewPage: React.FC = () => {
       setSelectedFile(e.dataTransfer.files[0]);
     }
   };
+  const handleDeleteFile = async (fileName: string) => {
+  if (!window.confirm(`Are you sure you want to delete "${fileName}" from branch "${selectedBranch}"?`)) return;
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/file`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: fileName, branch: selectedBranch }),
+      }
+    );
+    if (res.ok) {
+      toast({ title: "File deleted!", status: "success" });
+      // Refresh files and commits
+      const filesRes = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setFiles(await filesRes.json());
+      const commitsRes = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setCommits(await commitsRes.json());
+    } else {
+      toast({ title: "Error deleting file", status: "error" });
+    }
+  } catch {
+    toast({ title: "Server error", status: "error" });
+  }
+};
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setSelectedFile(e.target.files[0]);
@@ -126,7 +177,6 @@ const RepositoryViewPage: React.FC = () => {
     try {
       const fileText = await selectedFile.text();
       const token = localStorage.getItem('token');
-      // Commit direct (ca în CLI)
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commit`, {
         method: 'POST',
         headers: {
@@ -136,6 +186,7 @@ const RepositoryViewPage: React.FC = () => {
         body: JSON.stringify({
           message: commitMessage,
           files: [{ name: selectedFile.name, content: fileText }],
+          branch: selectedBranch,
         }),
       });
       if (res.ok) {
@@ -143,12 +194,11 @@ const RepositoryViewPage: React.FC = () => {
         setSelectedFile(null);
         setCommitMessage('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files`, {
+        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setFiles(await filesRes.json());
-        // Refresh commits
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits`, {
+        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setCommits(await commitsRes.json());
@@ -183,6 +233,7 @@ const RepositoryViewPage: React.FC = () => {
         body: JSON.stringify({
           message: `Edit ${editingFile.name}`,
           files: [{ name: editingFile.name, content: editingContent }],
+          branch: selectedBranch,
         }),
       });
       if (res.ok) {
@@ -190,11 +241,11 @@ const RepositoryViewPage: React.FC = () => {
         setEditingFile(null);
         setEditingContent('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files`, {
+        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits`, {
+        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setCommits(await commitsRes.json());
@@ -212,21 +263,6 @@ const RepositoryViewPage: React.FC = () => {
     setEditingContent('');
   };
 
-  const handleStar = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/star/${repoId}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setStarred(data.starred);
-      setStars(data.stars);
-    } catch {
-      toast({ title: "Error starring repository", status: "error" });
-    }
-  };
-
   if (loading || !repo) {
     return (
       <Box minH="60vh" display="flex" alignItems="center" justifyContent="center">
@@ -238,45 +274,71 @@ const RepositoryViewPage: React.FC = () => {
   return (
     <Box minH="100vh" w="100vw" bg="gray.50" py={10} px={0}>
       <Box maxW="900px" mx="auto" bg="white" borderRadius="lg" boxShadow="lg" p={8}>
-        {/* ...header, invite, etc... */}
+        {/* Branch selector */}
+        <HStack mb={6}>
+          <Text fontWeight="bold">Branch:</Text>
+          <select
+            value={selectedBranch}
+            onChange={e => setSelectedBranch(e.target.value)}
+            style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc' }}
+          >
+            {branches.map(branch => (
+              <option key={branch} value={branch}>{branch}</option>
+            ))}
+          </select>
+        </HStack>
 
         <Heading size="md" mt={8} mb={4}>Files</Heading>
         {files.length === 0 ? (
           <Text color="gray.400" mb={4}>No files in this repository.</Text>
         ) : (
-          <VStack align="stretch" spacing={1} mb={6}>
-            {files.map(file => (
-              <HStack
-                key={file._id}
-                p={3}
-                borderWidth={1}
-                borderRadius="md"
-                bg="gray.50"
-                _hover={{ bg: "teal.50", cursor: canEdit ? "pointer" : "default" }}
-                onClick={() => canEdit && handleOpenEdit(file)}
-                justify="space-between"
-              >
-                <HStack>
-                  <Icon as={FaFileAlt} color="teal.400" />
-                  <Text fontWeight="bold">{file.name}</Text>
-                </HStack>
-                {canEdit && (
-                  <Button
-                    size="xs"
-                    leftIcon={<FaEdit />}
-                    variant="ghost"
-                    colorScheme="teal"
-                    onClick={e => {
-                      e.stopPropagation();
-                      handleOpenEdit(file);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                )}
-              </HStack>
-            ))}
-          </VStack>
+               <VStack align="stretch" spacing={1} mb={6}>
+  {files.map(file => (
+    <HStack
+      key={file._id}
+      p={3}
+      borderWidth={1}
+      borderRadius="md"
+      bg="gray.50"
+      _hover={{ bg: "teal.50", cursor: canEdit ? "pointer" : "default" }}
+      onClick={() => canEdit && handleOpenEdit(file)}
+      justify="space-between"
+    >
+      <HStack>
+        <Icon as={FaFileAlt} color="teal.400" />
+        <Text fontWeight="bold">{file.name}</Text>
+      </HStack>
+      {canEdit && (
+        <HStack>
+          <Button
+            size="xs"
+            leftIcon={<FaEdit />}
+            variant="ghost"
+            colorScheme="teal"
+            onClick={e => {
+              e.stopPropagation();
+              handleOpenEdit(file);
+            }}
+          >
+            Edit
+          </Button>
+          <Button
+            size="xs"
+            leftIcon={<FaCopy />}
+            variant="ghost"
+            colorScheme="red"
+            onClick={e => {
+              e.stopPropagation();
+              handleDeleteFile(file.name);
+            }}
+          >
+            Delete
+          </Button>
+        </HStack>
+      )}
+    </HStack>
+  ))}
+</VStack>
         )}
 
         {/* Edit file modal */}
@@ -403,77 +465,95 @@ const RepositoryViewPage: React.FC = () => {
           )}
         </Box>
 
-        {/* CLI USAGE SECTION */}
+      {/* CLI USAGE SECTION */}
         <Box mt={12} p={6} borderWidth={1} borderRadius="lg" bg="gray.50">
           <HStack mb={2}>
             <Icon as={FaTerminal} color="teal.500" />
             <Heading size="sm">CodexBase CLI Quick Actions</Heading>
           </HStack>
+
           <VStack align="start" spacing={2} fontSize="sm">
             <HStack>
               <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
-                codexbase clone {repo._id}
+                codexbase clone {repo._id} -b {selectedBranch}
               </Code>
-              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase clone ${repo._id}`)}>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase clone ${repo._id} -b ${selectedBranch}`)}>
                 Copy
               </Button>
             </HStack>
             <HStack>
               <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
-                codexbase pushall {repo._id} -m "your message"
+                codexbase pushall {repo._id} -m "your message" -b {selectedBranch}
               </Code>
-              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase pushall ${repo._id} -m "your message"`)}>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase pushall ${repo._id} -m "your message" -b ${selectedBranch}`)}>
                 Copy
               </Button>
             </HStack>
             <HStack>
               <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
-                codexbase log {repo._id}
+                codexbase commit {repo._id} &lt;file&gt; -m "your message" -b {selectedBranch}
               </Code>
-              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase log ${repo._id}`)}>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase commit ${repo._id} <file> -m "your message" -b ${selectedBranch}`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase log {repo._id} -b {selectedBranch}
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase log ${repo._id} -b ${selectedBranch}`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase branches {repo._id}
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase branches ${repo._id}`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase branch-create {repo._id} &lt;branchName&gt; --from {selectedBranch}
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase branch-create ${repo._id} <branchName> --from ${selectedBranch}`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase branch-create {repo._id} &lt;branchName&gt; --from ""
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase branch-create ${repo._id} <branchName> --from ""`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase pr-create {repo._id} -s &lt;sourceBranch&gt; -t &lt;targetBranch&gt; --title "PR title"
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase pr-create ${repo._id} -s <sourceBranch> -t <targetBranch> --title "PR title"`)} >
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase pr-list {repo._id}
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase pr-list ${repo._id}`)}>
+                Copy
+              </Button>
+            </HStack>
+            <HStack>
+              <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md">
+                codexbase pr-merge &lt;prId&gt;
+              </Code>
+              <Button size="xs" colorScheme="teal" variant="outline" onClick={() => navigator.clipboard.writeText(`codexbase pr-merge <prId>`)} >
                 Copy
               </Button>
             </HStack>
           </VStack>
-          {(canEdit && token) && (
-            <Box mt={6} p={4} bg="teal.50" borderRadius="md" border="1px solid" borderColor="teal.200">
-              <Text fontWeight="bold" mb={1} color="teal.700">
-                Your CLI Token
-              </Text>
-              <HStack align="start">
-                <Box
-                  as="pre"
-                  px={2}
-                  py={1}
-                  borderRadius="md"
-                  bg="white"
-                  color="teal.800"
-                  fontSize="sm"
-                  maxW="100%"
-                  overflowX="auto"
-                  whiteSpace="pre-wrap"
-                  wordBreak="break-all"
-                  style={{ wordBreak: "break-all", whiteSpace: "pre-wrap" }}
-                >
-                  {token}
-                </Box>
-                <Button size="xs" colorScheme="teal" variant="solid" leftIcon={<FaCopy />} onClick={onCopy}>
-                  {hasCopied ? "Copied" : "Copy"}
-                </Button>
-              </HStack>
-              <Text fontSize="xs" color="teal.700" mt={2}>
-                Folosește acest token doar pentru autentificarea CLI. Nu îl distribui altora!
-              </Text>
-              <Box mt={2}>
-                <Code px={2} py={1} borderRadius="md" bg="gray.100" fontSize="md" whiteSpace="pre-wrap" wordBreak="break-all">
-                  codexbase login {token}
-                </Code>
-                <Button size="xs" colorScheme="teal" variant="outline" ml={2} onClick={() => navigator.clipboard.writeText(`codexbase login ${token}`)}>
-                  Copy
-                </Button>
-              </Box>
-            </Box>
-          )}
           <Text mt={4} fontSize="xs" color="gray.400">
             * Make sure you are in the folder where you want to run these commands.
           </Text>

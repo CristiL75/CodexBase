@@ -113,14 +113,6 @@ router.post("/:repoId/files", authenticateJWT, async (req: any, res) => {
 });
 
 // Listare fișiere dintr-un repository
-router.get("/:repoId/files", authenticateJWT, async (req, res) => {
-  try {
-    const files = await File.find({ repository: req.params.repoId });
-    res.json(files);
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 // Star/unstar repository (deja există, dar îl pun aici pentru claritate)
 router.post("/star/:id", authenticateJWT, async (req: any, res) => {
@@ -170,15 +162,15 @@ router.delete("/:repoId", authenticateJWT, async (req: any, res) => {
 
 
 
+// Commit pe branch
 router.post("/:repoId/commit", authenticateJWT, async (req: any, res) => {
   try {
-    const { message, files } = req.body; // files: [{name, content}]
+    const { message, files, branch = "main" } = req.body;
     const repoId = req.params.repoId;
 
-    // Creează/actualizează fișierele în colecția File
     for (const file of files) {
       await File.findOneAndUpdate(
-        { repository: repoId, name: file.name },
+        { repository: repoId, name: file.name, branch },
         {
           $set: {
             content: file.content,
@@ -189,15 +181,26 @@ router.post("/:repoId/commit", authenticateJWT, async (req: any, res) => {
       );
     }
 
-    // Creează commit-ul
     const commit = await Commit.create({
       repository: repoId,
+      branch,
       author: req.user.id,
       message,
       files,
     });
     res.status(201).json(commit);
-  } catch (err) {
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Listare fișiere pe branch
+router.get("/:repoId/files", authenticateJWT, async (req, res) => {
+  try {
+    const branch = req.query.branch || "main";
+    const files = await File.find({ repository: req.params.repoId, branch });
+    res.json(files);
+  } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -249,6 +252,105 @@ router.get("/:repoId/pull", authenticateJWT, async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
+});
+
+
+router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
+  try {
+    const { sourceBranch, targetBranch, title, description } = req.body;
+    const repoId = req.params.repoId;
+    const pr = await PullRequest.create({
+      repository: repoId,
+      sourceBranch,
+      targetBranch,
+      author: req.user.id,
+      title,
+      description,
+    });
+    res.status(201).json(pr);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/:repoId/pull-requests", authenticateJWT, async (req, res) => {
+  try {
+    const repoId = req.params.repoId;
+    const prs = await PullRequest.find({ repository: repoId }).sort({ createdAt: -1 });
+    res.json(prs);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/pull-request/:prId/merge", authenticateJWT, async (req, res) => {
+  try {
+    const pr = await PullRequest.findById(req.params.prId);
+    if (!pr || pr.status !== "open") return res.status(404).json({ message: "PR not found or already closed" });
+
+    // Copy files from sourceBranch to targetBranch
+    const files = await File.find({ repository: pr.repository, branch: pr.sourceBranch });
+    for (const file of files) {
+      await File.findOneAndUpdate(
+        { repository: pr.repository, name: file.name, branch: pr.targetBranch },
+        {
+          $set: {
+            content: file.content,
+            author: file.author,
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+    pr.status = "merged";
+    await pr.save();
+    res.json({ message: "Pull request merged" });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/:repoId/branch", authenticateJWT, async (req, res) => {
+  try {
+    const { branchName, fromBranch } = req.body;
+    const repoId = req.params.repoId;
+
+    // Dacă fromBranch e gol, null sau "", NU copia fișiere, doar creezi branch-ul logic (adică nu faci nimic, branch-ul va apărea când faci commit pe el)
+    if (fromBranch && fromBranch.trim() !== "") {
+      const files = await File.find({ repository: repoId, branch: fromBranch });
+      for (const file of files) {
+        await File.create({
+          repository: repoId,
+          branch: branchName,
+          name: file.name,
+          content: file.content,
+          author: file.author,
+        });
+      }
+    }
+    // Dacă nu copiem fișiere, branch-ul va apărea în listă după primul commit pe el,
+    // dar pentru UX poți returna succes oricum
+    res.status(201).json({ message: "Branch created" });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/:repoId/branches", authenticateJWT, async (req, res) => {
+  try {
+    const repoId = req.params.repoId;
+    const branches = await File.distinct("branch", { repository: repoId });
+    res.json(branches);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/:repoId/file", authenticateJWT, async (req, res) => {
+  const { name, branch } = req.body;
+  const repoId = req.params.repoId;
+  await File.deleteOne({ repository: repoId, name, branch });
+  res.json({ message: "File deleted" });
 });
 
 export default router;

@@ -17,9 +17,9 @@ router.get('/profile', authenticateJWT, async (req: any, res) => {
     // Numără repo-urile unde userul este owner
     const repoCount = await Repository.countDocuments({ owner: user._id });
 
-    // Adaugă _id în răspuns!
+  
     res.json({
-      _id: user._id, // <-- adaugă această linie!
+      _id: user._id, 
       name: user.name,
       email: user.email,
       avatar: user.avatar,

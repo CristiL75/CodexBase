@@ -15,6 +15,7 @@ export interface ICommit extends Document {
 
 const CommitSchema = new Schema<ICommit>({
   repository: { type: Schema.Types.ObjectId, ref: "Repository", required: true },
+  branch: { type: String, default: "main" }, // <--- add this
   author: { type: Schema.Types.ObjectId, ref: "User", required: true },
   message: { type: String, required: true },
   files: [
@@ -26,7 +27,6 @@ const CommitSchema = new Schema<ICommit>({
   hash: { type: String, required: true, unique: true },
   createdAt: { type: Date, default: Date.now },
 });
-
 // Generează hash înainte de salvare
 CommitSchema.pre("validate", function (next) {
   if (!this.hash) {
