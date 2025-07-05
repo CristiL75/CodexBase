@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea
+  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge
 } from '@chakra-ui/react';
 import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy } from 'react-icons/fa';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -23,6 +23,8 @@ const RepositoryViewPage: React.FC = () => {
   const [selectedBranch, setSelectedBranch] = useState('main');
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [pullRequests, setPullRequests] = useState<any[]>([]);
+  const [pullRequestsLoading, setPullRequestsLoading] = useState(false);
 
   // Token for CLI
   const token = localStorage.getItem('token');
@@ -34,47 +36,63 @@ const RepositoryViewPage: React.FC = () => {
     userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
   } catch {}
 
-  // Fetch repo, branches, files, commits
+  // Fetch repo, branches, PRs
   useEffect(() => {
-     const fetchRepo = async () => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const allRepos = await res.json();
-      const found = allRepos.find((r: any) => r._id === repoId);
-      setRepo(found);
-    } catch {}
-    setLoading(false);
-  };
-    const fetchBranches = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/branches`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      let data = await res.json();
-      // Always ensure at least 'main' exists
-      if (!Array.isArray(data) || data.length === 0) {
-        data = ['main'];
-      } else if (!data.includes('main')) {
-        data = ['main', ...data];
+    const fetchRepo = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const allRepos = await res.json();
+        const found = allRepos.find((r: any) => r._id === repoId);
+        setRepo(found);
+      } catch {}
+      setLoading(false);
+    };
+    const fetchPRs = async () => {
+      setPullRequestsLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/pull-requests`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json();
+        setPullRequests(Array.isArray(data) ? data : []);
+      } catch {
+        setPullRequests([]);
       }
-      setBranches(data);
-      if (!data.includes(selectedBranch)) setSelectedBranch('main');
-    } catch {
-      setBranches(['main']);
-      setSelectedBranch('main');
-    }
-  };
-  fetchRepo();
-  fetchBranches();
-  // eslint-disable-next-line
-}, [repoId]);
+      setPullRequestsLoading(false);
+    };
+    const fetchBranches = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/branches`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        let data = await res.json();
+        // Always ensure at least 'main' exists
+        if (!Array.isArray(data) || data.length === 0) {
+          data = ['main'];
+        } else if (!data.includes('main')) {
+          data = ['main', ...data];
+        }
+        setBranches(data);
+        if (!data.includes(selectedBranch)) setSelectedBranch('main');
+      } catch {
+        setBranches(['main']);
+        setSelectedBranch('main');
+      }
+    };
+    fetchRepo();
+    fetchBranches();
+    if (repoId) fetchPRs();
+    // eslint-disable-next-line
+  }, [repoId]);
 
   // Fetch files and commits when branch changes
   useEffect(() => {
@@ -91,6 +109,7 @@ const RepositoryViewPage: React.FC = () => {
         setFiles([]);
       }
     };
+
     const fetchCommits = async () => {
       setCommitsLoading(true);
       try {
@@ -106,6 +125,7 @@ const RepositoryViewPage: React.FC = () => {
       }
       setCommitsLoading(false);
     };
+
     fetchFiles();
     fetchCommits();
   }, [repoId, selectedBranch]);
@@ -127,40 +147,40 @@ const RepositoryViewPage: React.FC = () => {
     }
   };
   const handleDeleteFile = async (fileName: string) => {
-  if (!window.confirm(`Are you sure you want to delete "${fileName}" from branch "${selectedBranch}"?`)) return;
-  try {
-    const token = localStorage.getItem('token');
-    const res = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/file`,
-      {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: fileName, branch: selectedBranch }),
+    if (!window.confirm(`Are you sure you want to delete "${fileName}" from branch "${selectedBranch}"?`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/file`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ name: fileName, branch: selectedBranch }),
+        }
+      );
+      if (res.ok) {
+        toast({ title: "File deleted!", status: "success" });
+        // Refresh files and commits
+        const filesRes = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setFiles(await filesRes.json());
+        const commitsRes = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setCommits(await commitsRes.json());
+      } else {
+        toast({ title: "Error deleting file", status: "error" });
       }
-    );
-    if (res.ok) {
-      toast({ title: "File deleted!", status: "success" });
-      // Refresh files and commits
-      const filesRes = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setFiles(await filesRes.json());
-      const commitsRes = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setCommits(await commitsRes.json());
-    } else {
-      toast({ title: "Error deleting file", status: "error" });
+    } catch {
+      toast({ title: "Server error", status: "error" });
     }
-  } catch {
-    toast({ title: "Server error", status: "error" });
-  }
-};
+  };
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setSelectedFile(e.target.files[0]);
@@ -292,54 +312,127 @@ const RepositoryViewPage: React.FC = () => {
         {files.length === 0 ? (
           <Text color="gray.400" mb={4}>No files in this repository.</Text>
         ) : (
-               <VStack align="stretch" spacing={1} mb={6}>
-  {files.map(file => (
-    <HStack
-      key={file._id}
-      p={3}
-      borderWidth={1}
-      borderRadius="md"
-      bg="gray.50"
-      _hover={{ bg: "teal.50", cursor: canEdit ? "pointer" : "default" }}
-      onClick={() => canEdit && handleOpenEdit(file)}
-      justify="space-between"
-    >
-      <HStack>
-        <Icon as={FaFileAlt} color="teal.400" />
-        <Text fontWeight="bold">{file.name}</Text>
-      </HStack>
-      {canEdit && (
-        <HStack>
-          <Button
-            size="xs"
-            leftIcon={<FaEdit />}
-            variant="ghost"
-            colorScheme="teal"
-            onClick={e => {
-              e.stopPropagation();
-              handleOpenEdit(file);
-            }}
-          >
-            Edit
-          </Button>
-          <Button
-            size="xs"
-            leftIcon={<FaCopy />}
-            variant="ghost"
-            colorScheme="red"
-            onClick={e => {
-              e.stopPropagation();
-              handleDeleteFile(file.name);
-            }}
-          >
-            Delete
-          </Button>
-        </HStack>
-      )}
-    </HStack>
-  ))}
-</VStack>
+          <VStack align="stretch" spacing={1} mb={6}>
+            {files.map(file => (
+              <HStack
+                key={file._id}
+                p={3}
+                borderWidth={1}
+                borderRadius="md"
+                bg="gray.50"
+                _hover={{ bg: "teal.50", cursor: canEdit ? "pointer" : "default" }}
+                onClick={() => canEdit && handleOpenEdit(file)}
+                justify="space-between"
+              >
+                <HStack>
+                  <Icon as={FaFileAlt} color="teal.400" />
+                  <Text fontWeight="bold">{file.name}</Text>
+                </HStack>
+                {canEdit && (
+                  <HStack>
+                    <Button
+                      size="xs"
+                      leftIcon={<FaEdit />}
+                      variant="ghost"
+                      colorScheme="teal"
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleOpenEdit(file);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="xs"
+                      leftIcon={<FaCopy />}
+                      variant="ghost"
+                      colorScheme="red"
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleDeleteFile(file.name);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </HStack>
+                )}
+              </HStack>
+            ))}
+          </VStack>
         )}
+
+        {/* Pull Requests Section */}
+      {pullRequests.slice(0, 5).map(pr => (
+  <Box key={pr._id} p={3} bg="white" borderRadius="md" borderWidth={1}>
+    <HStack justify="space-between">
+      <Box>
+        <Text fontWeight="bold">{pr.title}</Text>
+        <Text fontSize="sm" color="gray.600">
+          {pr.sourceBranch} → {pr.targetBranch} &middot; by {pr.author?.name || pr.author?.email}
+        </Text>
+      </Box>
+      <Badge colorScheme={
+        pr.status === "open" ? "green" : pr.status === "merged" ? "blue" : "red"
+      }>
+        {pr.status}
+      </Badge>
+      {/* Butonul de merge doar pentru owner și doar dacă PR-ul e open */}
+    {repo?.owner?._id === userId && pr.status === "open" && (
+  <>
+    <Button
+      size="xs"
+      colorScheme="teal"
+      onClick={async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/merge`,
+            { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (res.ok) {
+            toast({ title: "Pull request merged!", status: "success" });
+            // Reîncarcă lista de PR-uri
+            // (poți apela fetchPRs sau reîncarcă pagina)
+          } else {
+            toast({ title: "Merge failed", status: "error" });
+          }
+        } catch {
+          toast({ title: "Server error", status: "error" });
+        }
+      }}
+      mr={2}
+    >
+      Merge
+    </Button>
+    <Button
+      size="xs"
+      colorScheme="red"
+      variant="outline"
+      onClick={async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/close`,
+            { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (res.ok) {
+            toast({ title: "Pull request closed!", status: "info" });
+            // Reîncarcă lista de PR-uri
+          } else {
+            toast({ title: "Close failed", status: "error" });
+          }
+        } catch {
+          toast({ title: "Server error", status: "error" });
+        }
+      }}
+    >
+      Reject
+    </Button>
+  </>
+)}
+    </HStack>
+  </Box>
+))}
 
         {/* Edit file modal */}
         <Modal isOpen={!!editingFile} onClose={handleCancelEdit} size="xl">
@@ -465,7 +558,7 @@ const RepositoryViewPage: React.FC = () => {
           )}
         </Box>
 
-      {/* CLI USAGE SECTION */}
+        {/* CLI USAGE SECTION */}
         <Box mt={12} p={6} borderWidth={1} borderRadius="lg" bg="gray.50">
           <HStack mb={2}>
             <Icon as={FaTerminal} color="teal.500" />
@@ -556,6 +649,39 @@ const RepositoryViewPage: React.FC = () => {
           </VStack>
           <Text mt={4} fontSize="xs" color="gray.400">
             * Make sure you are in the folder where you want to run these commands.
+          </Text>
+        </Box>
+        <Box mb={6}>
+          <HStack align="start">
+            <Box flex="1" maxW="80%">
+              <Code
+                px={2}
+                py={1}
+                borderRadius="md"
+                bg="gray.100"
+                fontSize="md"
+                whiteSpace="pre-wrap"
+                wordBreak="break-all"
+                w="100%"
+                display="block"
+              >
+                {`codexbase login ${token}`}
+              </Code>
+            </Box>
+            <Button
+              size="xs"
+              colorScheme="teal"
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(`codexbase login ${token}`);
+                toast({ title: "Login command copied!", status: "success", duration: 1500 });
+              }}
+            >
+              Copy
+            </Button>
+          </HStack>
+          <Text fontSize="xs" color="gray.500" mt={1}>
+            Use this command to authenticate the CLI with your account.
           </Text>
         </Box>
       </Box>

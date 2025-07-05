@@ -20,6 +20,7 @@ import ProfilePage from './pages/ProfilePage';
 import NewRepositoryPage from './pages/NewRepositoryPage';
 import RepositoriesPage from './pages/RepositoriesPage';
 import NotificationsPage from './pages/NotificationsPage';
+import RepositoryPullRequestsPage from './pages/RepositoryPullRequestsPage';
 
 
 function App() {
@@ -46,6 +47,7 @@ function App() {
               <Route path="/stars" element={<StarredRepositoriesPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/profile/:userId" element={<UserProfilePage />} />
+                 <Route path="/repository/:repoId/pulls" element={<RepositoryPullRequestsPage />} />
             </Route>
             
             {/* Rută implicită - redirecționează spre login */}

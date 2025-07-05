@@ -6,7 +6,7 @@ import { User } from "../models/User";
 import { File } from "../models/File";
 import { Invitation } from '../models/Invitation';
 import { Commit } from "../models/Commit";
-
+import { PullRequest } from "../models/PullRequest";
 
 const router = express.Router();
 
@@ -273,20 +273,18 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
   }
 });
 
-router.get("/:repoId/pull-requests", authenticateJWT, async (req, res) => {
-  try {
-    const repoId = req.params.repoId;
-    const prs = await PullRequest.find({ repository: repoId }).sort({ createdAt: -1 });
-    res.json(prs);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 router.post("/pull-request/:prId/merge", authenticateJWT, async (req, res) => {
   try {
     const pr = await PullRequest.findById(req.params.prId);
     if (!pr || pr.status !== "open") return res.status(404).json({ message: "PR not found or already closed" });
+
+    // Verifică dacă userul este OWNERUL repo-ului
+    const repo = await Repository.findById(pr.repository);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+    if (repo.owner.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the owner can merge this pull request" });
+    }
 
     // Copy files from sourceBranch to targetBranch
     const files = await File.find({ repository: pr.repository, branch: pr.sourceBranch });
@@ -309,6 +307,16 @@ router.post("/pull-request/:prId/merge", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+   router.get("/:repoId/pull-requests", authenticateJWT, async (req, res) => {
+  try {
+    const repoId = req.params.repoId;
+    const prs = await PullRequest.find({ repository: repoId }).sort({ createdAt: -1 });
+    res.json(prs);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+}); 
 
 router.post("/:repoId/branch", authenticateJWT, async (req, res) => {
   try {
@@ -335,7 +343,24 @@ router.post("/:repoId/branch", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+router.post("/pull-request/:prId/close", authenticateJWT, async (req, res) => {
+  try {
+    const pr = await PullRequest.findById(req.params.prId);
+    if (!pr || pr.status !== "open") return res.status(404).json({ message: "PR not found or already closed" });
 
+    // Doar ownerul poate închide PR-ul
+    const repo = await Repository.findById(pr.repository);
+    if (!repo || repo.owner.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the owner can close this pull request" });
+    }
+
+    pr.status = "closed";
+    await pr.save();
+    res.json({ message: "Pull request closed" });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 router.get("/:repoId/branches", authenticateJWT, async (req, res) => {
   try {
     const repoId = req.params.repoId;

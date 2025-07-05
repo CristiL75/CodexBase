@@ -156,11 +156,7 @@ const Navbar: React.FC = () => {
                 Repositories
               </Button>
             </Link>
-            <Link to="/pulls">
-              <Button leftIcon={<FaCodeBranch />} colorScheme="teal" variant="ghost" mr={2}>
-                Pull Requests
-              </Button>
-            </Link>
+          
             <Link to="/notifications">
               <IconButton
                 aria-label="Notifications"
