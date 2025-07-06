@@ -330,4 +330,21 @@ router.post("/2fa/disable", authenticateJWT, async (req: any, res) => {
   }
 });
 
+
+export const authenticateJWToptional = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.split(" ")[1];
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = await User.findById(decoded.id);
+    } catch {
+      req.user = null; // IMPORTANT: nu arunca eroare, doar setează null
+    }
+  } else {
+    req.user = null;
+  }
+  next();
+};
+
 export default router;

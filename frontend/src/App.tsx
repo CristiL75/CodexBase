@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import RepositoryViewPage from './pages/RepositoryViewPage';
 import StarredRepositoriesPage from './pages/StarredRepositoriesPage';
 import UserProfilePage from './pages/UserProfilePage';
-
+import ExplorePage from './pages/ExplorePage';
 // Componente
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -35,7 +35,8 @@ function App() {
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/2fa-verify" element={<TwoFAVerify />} />
             <Route path="/auth/success" element={<AuthCallback />} />
-            
+            <Route path="/explore" element={<ExplorePage />} /> {/* <-- Adăugat aici */}
+
             {/* Rute protejate */}
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<HomePage />} />
@@ -47,7 +48,7 @@ function App() {
               <Route path="/stars" element={<StarredRepositoriesPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/profile/:userId" element={<UserProfilePage />} />
-                 <Route path="/repository/:repoId/pulls" element={<RepositoryPullRequestsPage />} />
+              <Route path="/repository/:repoId/pulls" element={<RepositoryPullRequestsPage />} />
             </Route>
             
             {/* Rută implicită - redirecționează spre login */}

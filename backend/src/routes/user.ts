@@ -209,5 +209,28 @@ router.get('/:userId/following', authenticateJWT, async (req, res) => {
   }
 });
 
+router.get("/:userId/activity", authenticateJWT, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    // Ultimele 14 zile de commit-uri
+    const since = new Date();
+    since.setDate(since.getDate() - 13);
+    const commits = await Commit.find({
+      author: userId,
+      createdAt: { $gte: since }
+    }).sort({ createdAt: -1 }).lean();
+
+    // Ultimele 3 repo-uri publice în care userul a avut commit
+    const repoIds = [...new Set(commits.map(c => c.repository.toString()))];
+    const recentRepos = await Repository.find({
+      _id: { $in: repoIds },
+      isPrivate: false
+    }).limit(3).lean();
+
+    res.json({ commits, recentRepos });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 export default router;

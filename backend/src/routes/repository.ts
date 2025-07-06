@@ -1,6 +1,6 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
-import { authenticateJWT } from "./auth";
+import { authenticateJWT, authenticateJWToptional } from "./auth";
 import { Repository } from "../models/Repository";
 import { User } from "../models/User";
 import { File } from "../models/File";
@@ -9,6 +9,19 @@ import { Commit } from "../models/Commit";
 import { PullRequest } from "../models/PullRequest";
 
 const router = express.Router();
+
+// Helper pentru verificare colaborator/owner
+function isUserCollaborator(repo: any, req: any) {
+  if (!req.user) return false;
+  const userId = req.user.id?.toString?.() || req.user._id?.toString?.() || req.user;
+  const ownerId = repo.owner?._id?.toString?.() || repo.owner?.toString?.() || repo.owner;
+  return (
+    ownerId === userId ||
+    (repo.collaborators || []).some((c: any) =>
+      (c?._id?.toString?.() || c?.toString?.() || c) === userId
+    )
+  );
+}
 
 // Creează un repository nou
 router.post(
@@ -27,7 +40,6 @@ router.post(
     }
     try {
       const { name, description, isPrivate, collaborators } = req.body;
-      // Adaugă owner-ul și ca membru implicit
       const allCollaborators = collaborators && collaborators.length
         ? [...new Set([req.user.id, ...collaborators])]
         : [req.user.id];
@@ -46,7 +58,7 @@ router.post(
   }
 );
 
-// Listare repo-uri ale userului (owner sau colaborator) - varianta corectă și unică
+// Listare repo-uri ale userului (owner sau colaborator)
 router.get("/my", authenticateJWT, async (req: any, res) => {
   try {
     const userId = req.user.id;
@@ -73,6 +85,7 @@ router.get("/my", authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 // Marchează/demarchează stea pe repo
 router.post("/star/:id", authenticateJWT, async (req: any, res) => {
   try {
@@ -94,12 +107,18 @@ router.post("/star/:id", authenticateJWT, async (req: any, res) => {
   }
 });
 
-
-
+// Adaugă fișier nou (doar colaboratori/owner)
 router.post("/:repoId/files", authenticateJWT, async (req: any, res) => {
   try {
     const { name, content } = req.body;
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to modify this repository" });
+    }
+
     const file = await File.create({
       repository: repoId,
       name,
@@ -112,61 +131,48 @@ router.post("/:repoId/files", authenticateJWT, async (req: any, res) => {
   }
 });
 
-// Listare fișiere dintr-un repository
-
-// Star/unstar repository (deja există, dar îl pun aici pentru claritate)
-router.post("/star/:id", authenticateJWT, async (req: any, res) => {
+// Listare fișiere dintr-un repository (public: oricine vede, privat: doar colaboratori/owner)
+router.get("/:repoId/files", authenticateJWToptional, async (req, res) => {
   try {
-    const repo = await Repository.findById(req.params.id);
+    const repoId = req.params.repoId;
+    const branch = req.query.branch || "main";
+    const repo = await Repository.findById(repoId).lean();
     if (!repo) return res.status(404).json({ message: "Repository not found" });
 
-    const userId = req.user.id;
-    const hasStar = repo.starredBy.some((id: any) => id.toString() === userId);
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      return res.status(403).json({ message: "You do not have access to this repository" });
+    }
 
-    if (hasStar) {
-      repo.starredBy = repo.starredBy.filter((id: any) => id.toString() !== userId);
+    let files = [];
+    // Trimite content pentru toți (vizualizare cod), dar doar colaboratorii pot edita din frontend
+    if (isCollaborator) {
+      files = await File.find({ repository: repoId, branch })
+        .select("name author createdAt content")
+        .lean();
     } else {
-      repo.starredBy.push(userId);
+      files = await File.find({ repository: repoId, branch })
+        .limit(20)
+        .select("name author createdAt content")
+        .lean();
     }
-    await repo.save();
-    res.json({ starred: !hasStar, stars: repo.starredBy.length });
+    res.json(files);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// Invită un utilizator existent într-un repository (doar owner sau colaborator poate invita)
-
-router.delete("/:repoId", authenticateJWT, async (req: any, res) => {
-  try {
-    const repo = await Repository.findById(req.params.repoId);
-    if (!repo) return res.status(404).json({ message: "Repository not found" });
-
-    // Permite ștergerea doar dacă userul este owner
-    if (repo.owner.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Only the owner can delete this repository" });
-    }
-
-    // Șterge toate fișierele asociate repo-ului
-    await File.deleteMany({ repository: repo._id });
-
-    // Șterge repo-ul
-    await repo.deleteOne();
-
-    res.json({ message: "Repository deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-
-
-
-// Commit pe branch
+// Commit pe branch (doar colaboratori/owner)
 router.post("/:repoId/commit", authenticateJWT, async (req: any, res) => {
   try {
     const { message, files, branch = "main" } = req.body;
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to modify this repository" });
+    }
 
     for (const file of files) {
       await File.findOneAndUpdate(
@@ -194,20 +200,19 @@ router.post("/:repoId/commit", authenticateJWT, async (req: any, res) => {
   }
 });
 
-// Listare fișiere pe branch
-router.get("/:repoId/files", authenticateJWT, async (req, res) => {
+// Listare commits (public: oricine vede, privat: doar colaboratori/owner)
+router.get("/:repoId/commits", authenticateJWToptional, async (req, res) => {
   try {
-    const branch = req.query.branch || "main";
-    const files = await File.find({ repository: req.params.repoId, branch });
-    res.json(files);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
+    const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId).lean();
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
 
-router.get("/:repoId/commits", authenticateJWT, async (req, res) => {
-  try {
-    const commits = await Commit.find({ repository: req.params.repoId })
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      return res.status(403).json({ message: "You do not have access to this repository" });
+    }
+
+    const commits = await Commit.find({ repository: repoId })
       .sort({ createdAt: -1 })
       .limit(50)
       .populate('author', 'name email');
@@ -217,25 +222,40 @@ router.get("/:repoId/commits", authenticateJWT, async (req, res) => {
   }
 });
 
+// Clone repo (doar colaboratori/owner)
 router.get("/:repoId/clone", authenticateJWT, async (req, res) => {
   try {
-    const files = await File.find({ repository: req.params.repoId });
-    const commits = await Commit.find({ repository: req.params.repoId }).sort({ createdAt: 1 });
+    const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to clone this repository" });
+    }
+
+    const files = await File.find({ repository: repoId });
+    const commits = await Commit.find({ repository: repoId }).sort({ createdAt: 1 });
     res.json({ files, commits });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 });
 
+// Pull (doar colaboratori/owner)
 router.get("/:repoId/pull", authenticateJWT, async (req, res) => {
   try {
     const repoId = req.params.repoId;
-    // Poți trimite un parametru ?since=<hash> ca să primești doar commit-urile noi
     const sinceHash = req.query.since as string | undefined;
+
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to pull this repository" });
+    }
 
     let commits;
     if (sinceHash) {
-      // Găsește commit-ul cu hash-ul respectiv și returnează doar cele mai noi
       const sinceCommit = await Commit.findOne({ repository: repoId, hash: sinceHash });
       if (!sinceCommit) return res.status(404).json({ message: "Commit not found" });
       commits = await Commit.find({
@@ -243,7 +263,6 @@ router.get("/:repoId/pull", authenticateJWT, async (req, res) => {
         createdAt: { $gt: sinceCommit.createdAt }
       }).sort({ createdAt: 1 });
     } else {
-      // Toate commit-urile
       commits = await Commit.find({ repository: repoId }).sort({ createdAt: 1 });
     }
 
@@ -254,11 +273,66 @@ router.get("/:repoId/pull", authenticateJWT, async (req, res) => {
   }
 });
 
+// Vizualizare repo (public: oricine vede, privat: doar colaboratori/owner)
+router.get("/:repoId", authenticateJWToptional, async (req, res) => {
+  const start = Date.now();
+  try {
+    const repoId = req.params.repoId;
+    console.log(`[RepoView] Start request for repo ${repoId}`);
 
+    const repo = await Repository.findById(repoId)
+      .populate("owner", "name email avatar")
+      .lean();
+    if (!repo) {
+      console.log(`[RepoView] Repo not found`);
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      console.log(`[RepoView] Access denied for user ${req.user ? req.user.id : "anon"}`);
+      return res.status(403).json({ message: "You do not have access to this repository" });
+    }
+
+    let files = [];
+    const branch = req.query.branch || "main";
+    const filesStart = Date.now();
+    if (isCollaborator) {
+      files = await File.find({ repository: repoId, branch })
+        .select("name author createdAt content")
+        .lean();
+    } else {
+      files = await File.find({ repository: repoId, branch })
+        .limit(20)
+        .select("name author createdAt content")
+        .lean();
+    }
+    console.log(`[RepoView] Files query took ${Date.now() - filesStart} ms, files.length=${files.length}`);
+
+    res.json({
+      ...repo,
+      files,
+      isCollaborator,
+    });
+    console.log(`[RepoView] Total request took ${Date.now() - start} ms`);
+  } catch (err) {
+    console.log(`[RepoView] ERROR:`, err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Pull request routes (doar colaboratori/owner)
 router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
   try {
     const { sourceBranch, targetBranch, title, description } = req.body;
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to create pull requests" });
+    }
+
     const pr = await PullRequest.create({
       repository: repoId,
       sourceBranch,
@@ -273,20 +347,17 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
   }
 });
 
-
 router.post("/pull-request/:prId/merge", authenticateJWT, async (req, res) => {
   try {
     const pr = await PullRequest.findById(req.params.prId);
     if (!pr || pr.status !== "open") return res.status(404).json({ message: "PR not found or already closed" });
 
-    // Verifică dacă userul este OWNERUL repo-ului
     const repo = await Repository.findById(pr.repository);
     if (!repo) return res.status(404).json({ message: "Repository not found" });
-    if (repo.owner.toString() !== req.user.id) {
+    if (!isUserCollaborator(repo, req) || repo.owner.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the owner can merge this pull request" });
     }
 
-    // Copy files from sourceBranch to targetBranch
     const files = await File.find({ repository: pr.repository, branch: pr.sourceBranch });
     for (const file of files) {
       await File.findOneAndUpdate(
@@ -308,22 +379,35 @@ router.post("/pull-request/:prId/merge", authenticateJWT, async (req, res) => {
   }
 });
 
-   router.get("/:repoId/pull-requests", authenticateJWT, async (req, res) => {
+router.get("/:repoId/pull-requests", authenticateJWToptional, async (req, res) => {
   try {
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId).lean();
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      return res.status(403).json({ message: "You do not have access to this repository" });
+    }
+
     const prs = await PullRequest.find({ repository: repoId }).sort({ createdAt: -1 });
     res.json(prs);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
-}); 
+});
 
 router.post("/:repoId/branch", authenticateJWT, async (req, res) => {
   try {
     const { branchName, fromBranch } = req.body;
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
 
-    // Dacă fromBranch e gol, null sau "", NU copia fișiere, doar creezi branch-ul logic (adică nu faci nimic, branch-ul va apărea când faci commit pe el)
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to create branches" });
+    }
+
     if (fromBranch && fromBranch.trim() !== "") {
       const files = await File.find({ repository: repoId, branch: fromBranch });
       for (const file of files) {
@@ -336,21 +420,19 @@ router.post("/:repoId/branch", authenticateJWT, async (req, res) => {
         });
       }
     }
-    // Dacă nu copiem fișiere, branch-ul va apărea în listă după primul commit pe el,
-    // dar pentru UX poți returna succes oricum
     res.status(201).json({ message: "Branch created" });
   } catch {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 router.post("/pull-request/:prId/close", authenticateJWT, async (req, res) => {
   try {
     const pr = await PullRequest.findById(req.params.prId);
     if (!pr || pr.status !== "open") return res.status(404).json({ message: "PR not found or already closed" });
 
-    // Doar ownerul poate închide PR-ul
     const repo = await Repository.findById(pr.repository);
-    if (!repo || repo.owner.toString() !== req.user.id) {
+    if (!repo || !isUserCollaborator(repo, req) || repo.owner.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the owner can close this pull request" });
     }
 
@@ -361,9 +443,18 @@ router.post("/pull-request/:prId/close", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-router.get("/:repoId/branches", authenticateJWT, async (req, res) => {
+
+router.get("/:repoId/branches", authenticateJWToptional, async (req, res) => {
   try {
     const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId).lean();
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      return res.status(403).json({ message: "You do not have access to this repository" });
+    }
+
     const branches = await File.distinct("branch", { repository: repoId });
     res.json(branches);
   } catch {
@@ -372,10 +463,90 @@ router.get("/:repoId/branches", authenticateJWT, async (req, res) => {
 });
 
 router.delete("/:repoId/file", authenticateJWT, async (req, res) => {
-  const { name, branch } = req.body;
-  const repoId = req.params.repoId;
-  await File.deleteOne({ repository: repoId, name, branch });
-  res.json({ message: "File deleted" });
+  try {
+    const { name, branch } = req.body;
+    const repoId = req.params.repoId;
+    const repo = await Repository.findById(repoId);
+    if (!repo) return res.status(404).json({ message: "Repository not found" });
+
+    if (!isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to delete files" });
+    }
+
+    await File.deleteOne({ repository: repoId, name, branch });
+    res.json({ message: "File deleted" });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/public", async (req, res) => {
+  try {
+    const repos = await Repository.find({ isPrivate: false })
+      .populate("owner", "name email avatar")
+      .lean();
+    repos.forEach(repo => {
+      repo.stars = Array.isArray(repo.starredBy) ? repo.starredBy.length : 0;
+    });
+    res.json(repos);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get('/popular', async (req, res) => {
+  try {
+    const users = await User.find({})
+      .sort({ followers: -1 })
+      .limit(12)
+      .select('_id name email avatar followers')
+      .lean();
+    for (const user of users) {
+      user.repositories = await Repository.countDocuments({ owner: user._id });
+    }
+    res.json(users);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/activity/recent", authenticateJWT, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("following");
+    const followingIds = user?.following ? [...user.following, req.user.id] : [req.user.id];
+
+    const repos = await Repository.find({ owner: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("owner", "email name");
+
+    const starred = await Repository.find({ "starredBy": { $in: followingIds } })
+      .sort({ updatedAt: -1 })
+      .limit(5)
+      .populate("owner", "email name")
+      .populate("starredBy", "email name");
+
+    const prs = await PullRequest.find({ author: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("author", "email name")
+      .populate("repository", "name");
+
+    const commits = await Commit.find({ author: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("author", "email name")
+      .populate("repository", "name");
+
+    res.json({
+      repos,
+      starred,
+      prs,
+      commits,
+    });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 export default router;

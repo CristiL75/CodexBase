@@ -23,6 +23,9 @@ import {
   ListItem,
   Link as ChakraLink,
   useDisclosure,
+  SimpleGrid,
+  Progress,
+  Code,
 } from '@chakra-ui/react';
 
 const UserProfilePage: React.FC = () => {
@@ -36,6 +39,9 @@ const UserProfilePage: React.FC = () => {
   const [followingList, setFollowingList] = useState<any[]>([]);
   const [followersLoading, setFollowersLoading] = useState(false);
   const [followingLoading, setFollowingLoading] = useState(false);
+  const [commitActivity, setCommitActivity] = useState<any[]>([]);
+  const [recentRepos, setRecentRepos] = useState<any[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
   const toast = useToast();
   const navigate = useNavigate();
   const {
@@ -49,7 +55,7 @@ const UserProfilePage: React.FC = () => {
     onClose: onFollowingClose,
   } = useDisclosure();
 
-  // Verifică dacă userul logat îl urmărește deja pe acest user
+  // Fetch user profile and check if logged user follows this user
   useEffect(() => {
     const fetchUser = async () => {
       setLoading(true);
@@ -79,6 +85,35 @@ const UserProfilePage: React.FC = () => {
       setLoading(false);
     };
     if (userId) fetchUser();
+  }, [userId]);
+
+  // Fetch commit activity & recent repos
+  useEffect(() => {
+    const fetchActivity = async () => {
+      setActivityLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${userId}/activity`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setCommitActivity(data.commits || []);
+          setRecentRepos(data.recentRepos || []);
+        } else {
+          setCommitActivity([]);
+          setRecentRepos([]);
+        }
+      } catch {
+        setCommitActivity([]);
+        setRecentRepos([]);
+      }
+      setActivityLoading(false);
+    };
+    if (userId) fetchActivity();
   }, [userId]);
 
   const handleFollow = async () => {
@@ -232,6 +267,19 @@ const UserProfilePage: React.FC = () => {
 
   if (!user) return null;
 
+  // Commit activity summary (last 14 days)
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    return d.toISOString().slice(0, 10);
+  });
+  const commitsPerDay: Record<string, number> = {};
+  days.forEach(day => { commitsPerDay[day] = 0; });
+  commitActivity.forEach((commit: any) => {
+    const day = new Date(commit.createdAt).toISOString().slice(0, 10);
+    if (commitsPerDay[day] !== undefined) commitsPerDay[day]++;
+  });
+
   return (
     <Box
       minH="100vh"
@@ -245,7 +293,7 @@ const UserProfilePage: React.FC = () => {
       m={0}
     >
       <Box
-        w={{ base: "100%", md: "600px" }}
+        w={{ base: "100%", md: "700px" }}
         maxW="100vw"
         p={8}
         bg="white"
@@ -291,6 +339,65 @@ const UserProfilePage: React.FC = () => {
             {isFollowing ? "Unfollow" : "Follow"}
           </Button>
         </VStack>
+
+        {/* Commit Activity Box */}
+        <Box w="100%" mt={8} mb={4} p={4} bg="gray.50" borderRadius="md" boxShadow="sm">
+          <Heading size="sm" mb={2}>Commit Activity (last 14 days)</Heading>
+          <HStack spacing={1} align="end">
+            {days.map(day => (
+              <VStack key={day} spacing={0}>
+                <Box
+                  w="18px"
+                  h={`${Math.min(commitsPerDay[day] * 12, 48)}px`}
+                  bg={commitsPerDay[day] > 0 ? "teal.400" : "gray.200"}
+                  borderRadius="sm"
+                  transition="height 0.2s"
+                />
+                <Text fontSize="xs" color="gray.400">
+                  {new Date(day).getDate()}
+                </Text>
+              </VStack>
+            ))}
+          </HStack>
+          <Text fontSize="xs" color="gray.500" mt={2}>
+            Total commits: {commitActivity.length}
+          </Text>
+        </Box>
+
+        {/* Recent Repositories */}
+        <Box w="100%" mt={2} mb={2} p={4} bg="gray.50" borderRadius="md" boxShadow="sm">
+          <Heading size="sm" mb={2}>Recent Public Repositories</Heading>
+          {activityLoading ? (
+            <Spinner size="sm" />
+          ) : (
+            <SimpleGrid columns={{ base: 1, md: 1 }} spacing={3}>
+              {recentRepos.length === 0 && (
+                <Text color="gray.400">No recent public repositories.</Text>
+              )}
+              {recentRepos.map((repo: any) => (
+                <Box
+                  key={repo._id}
+                  p={3}
+                  borderWidth={1}
+                  borderRadius="md"
+                  bg="white"
+                  _hover={{ bg: "teal.50", cursor: "pointer" }}
+                  onClick={() => navigate(`/repository/${repo._id}`)}
+                >
+                  <HStack justify="space-between">
+                    <Box>
+                      <Heading size="sm">{repo.name}</Heading>
+                      <Text fontSize="sm" color="gray.600">{repo.description}</Text>
+                    </Box>
+                    <Badge colorScheme={repo.isPrivate ? "red" : "teal"}>
+                      {repo.isPrivate ? "Private" : "Public"}
+                    </Badge>
+                  </HStack>
+                </Box>
+              ))}
+            </SimpleGrid>
+          )}
+        </Box>
       </Box>
 
       {/* Followers Modal */}

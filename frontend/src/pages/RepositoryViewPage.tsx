@@ -3,7 +3,7 @@ import {
   Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge
 } from '@chakra-ui/react';
 import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy } from 'react-icons/fa';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -25,6 +25,7 @@ const RepositoryViewPage: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pullRequests, setPullRequests] = useState<any[]>([]);
   const [pullRequestsLoading, setPullRequestsLoading] = useState(false);
+  const [viewingFile, setViewingFile] = useState<any>(null);
 
   // Token for CLI
   const token = localStorage.getItem('token');
@@ -41,24 +42,31 @@ const RepositoryViewPage: React.FC = () => {
     const fetchRepo = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}`,
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
-        const allRepos = await res.json();
-        const found = allRepos.find((r: any) => r._id === repoId);
-        setRepo(found);
-      } catch {}
+        if (res.ok) {
+          const data = await res.json();
+          setRepo(data);
+        } else {
+          setRepo(null);
+        }
+      } catch {
+        setRepo(null);
+      }
       setLoading(false);
     };
     const fetchPRs = async () => {
       setPullRequestsLoading(true);
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/pull-requests`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         const data = await res.json();
         setPullRequests(Array.isArray(data) ? data : []);
@@ -69,13 +77,13 @@ const RepositoryViewPage: React.FC = () => {
     };
     const fetchBranches = async () => {
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/branches`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         let data = await res.json();
-        // Always ensure at least 'main' exists
         if (!Array.isArray(data) || data.length === 0) {
           data = ['main'];
         } else if (!data.includes('main')) {
@@ -98,10 +106,11 @@ const RepositoryViewPage: React.FC = () => {
   useEffect(() => {
     const fetchFiles = async () => {
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         const data = await res.json();
         setFiles(data);
@@ -113,10 +122,11 @@ const RepositoryViewPage: React.FC = () => {
     const fetchCommits = async () => {
       setCommitsLoading(true);
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         const data = await res.json();
         setCommits(data);
@@ -128,7 +138,8 @@ const RepositoryViewPage: React.FC = () => {
 
     fetchFiles();
     fetchCommits();
-  }, [repoId, selectedBranch]);
+    // eslint-disable-next-line
+  }, [repoId, selectedBranch, token]);
 
   // Drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -149,7 +160,6 @@ const RepositoryViewPage: React.FC = () => {
   const handleDeleteFile = async (fileName: string) => {
     if (!window.confirm(`Are you sure you want to delete "${fileName}" from branch "${selectedBranch}"?`)) return;
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/file`,
         {
@@ -166,12 +176,16 @@ const RepositoryViewPage: React.FC = () => {
         // Refresh files and commits
         const filesRes = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         setFiles(await filesRes.json());
         const commitsRes = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
         );
         setCommits(await commitsRes.json());
       } else {
@@ -196,7 +210,6 @@ const RepositoryViewPage: React.FC = () => {
     setUploading(true);
     try {
       const fileText = await selectedFile.text();
-      const token = localStorage.getItem('token');
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commit`, {
         method: 'POST',
         headers: {
@@ -214,13 +227,17 @@ const RepositoryViewPage: React.FC = () => {
         setSelectedFile(null);
         setCommitMessage('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
+        );
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
+        );
         setCommits(await commitsRes.json());
       } else {
         toast({ title: "Error uploading file", status: "error" });
@@ -232,8 +249,12 @@ const RepositoryViewPage: React.FC = () => {
   };
 
   // Edit file logic
-  const canEdit = repo && (repo.owner?._id === userId || (repo.collaborators && repo.collaborators.some((c: any) => c._id === userId)));
-
+  const canEdit = repo && (
+    (repo.owner?._id?.toString?.() || repo.owner?.toString?.() || repo.owner) === userId ||
+    (repo.collaborators && repo.collaborators.some((c: any) =>
+      (c?._id?.toString?.() || c?.toString?.() || c) === userId
+    ))
+  );
   const handleOpenEdit = (file: any) => {
     setEditingFile(file);
     setEditingContent(file.content);
@@ -243,7 +264,6 @@ const RepositoryViewPage: React.FC = () => {
     if (!editingFile) return;
     setEditingLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commit`, {
         method: 'POST',
         headers: {
@@ -261,13 +281,17 @@ const RepositoryViewPage: React.FC = () => {
         setEditingFile(null);
         setEditingContent('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
+        );
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
+          token
+            ? { headers: { Authorization: `Bearer ${token}` } }
+            : undefined
+        );
         setCommits(await commitsRes.json());
       } else {
         toast({ title: "Error updating file", status: "error" });
@@ -283,10 +307,26 @@ const RepositoryViewPage: React.FC = () => {
     setEditingContent('');
   };
 
-  if (loading || !repo) {
+  // Vizualizare cod fișier (oricine poate vedea, doar colaboratorii pot edita)
+  const handleViewFile = (file: any) => {
+    setViewingFile(file);
+  };
+  const handleCloseViewFile = () => {
+    setViewingFile(null);
+  };
+
+  if (loading) {
     return (
       <Box minH="60vh" display="flex" alignItems="center" justifyContent="center">
         <Spinner size="xl" />
+      </Box>
+    );
+  }
+
+  if (!repo) {
+    return (
+      <Box minH="60vh" display="flex" alignItems="center" justifyContent="center">
+        <Text color="red.500" fontWeight="bold">Repository not found or you do not have access.</Text>
       </Box>
     );
   }
@@ -320,8 +360,8 @@ const RepositoryViewPage: React.FC = () => {
                 borderWidth={1}
                 borderRadius="md"
                 bg="gray.50"
-                _hover={{ bg: "teal.50", cursor: canEdit ? "pointer" : "default" }}
-                onClick={() => canEdit && handleOpenEdit(file)}
+                _hover={{ bg: "teal.50", cursor: "pointer" }}
+                onClick={() => handleViewFile(file)}
                 justify="space-between"
               >
                 <HStack>
@@ -361,78 +401,114 @@ const RepositoryViewPage: React.FC = () => {
           </VStack>
         )}
 
+        {/* Vizualizare cod fișier (oricine poate vedea, doar colaboratorii pot edita) */}
+        <Modal isOpen={!!viewingFile} onClose={handleCloseViewFile} size="4xl">
+          <ModalOverlay />
+          <ModalContent>
+            <ModalHeader>
+              View file: {viewingFile?.name}
+            </ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <Code
+                px={2}
+                py={2}
+                borderRadius="md"
+                bg="gray.100"
+                fontSize="md"
+                whiteSpace="pre-wrap"
+                wordBreak="break-all"
+                w="100%"
+                display="block"
+              >
+                {viewingFile?.content || "No content"}
+              </Code>
+            </ModalBody>
+            <ModalFooter>
+              <Button onClick={handleCloseViewFile}>Close</Button>
+              {canEdit && (
+                <Button
+                  colorScheme="teal"
+                  ml={3}
+                  onClick={() => {
+                    setEditingFile(viewingFile);
+                    setEditingContent(viewingFile.content);
+                    setViewingFile(null);
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
+
         {/* Pull Requests Section */}
-      {pullRequests.slice(0, 5).map(pr => (
-  <Box key={pr._id} p={3} bg="white" borderRadius="md" borderWidth={1}>
-    <HStack justify="space-between">
-      <Box>
-        <Text fontWeight="bold">{pr.title}</Text>
-        <Text fontSize="sm" color="gray.600">
-          {pr.sourceBranch} → {pr.targetBranch} &middot; by {pr.author?.name || pr.author?.email}
-        </Text>
-      </Box>
-      <Badge colorScheme={
-        pr.status === "open" ? "green" : pr.status === "merged" ? "blue" : "red"
-      }>
-        {pr.status}
-      </Badge>
-      {/* Butonul de merge doar pentru owner și doar dacă PR-ul e open */}
-    {repo?.owner?._id === userId && pr.status === "open" && (
-  <>
-    <Button
-      size="xs"
-      colorScheme="teal"
-      onClick={async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/merge`,
-            { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (res.ok) {
-            toast({ title: "Pull request merged!", status: "success" });
-            // Reîncarcă lista de PR-uri
-            // (poți apela fetchPRs sau reîncarcă pagina)
-          } else {
-            toast({ title: "Merge failed", status: "error" });
-          }
-        } catch {
-          toast({ title: "Server error", status: "error" });
-        }
-      }}
-      mr={2}
-    >
-      Merge
-    </Button>
-    <Button
-      size="xs"
-      colorScheme="red"
-      variant="outline"
-      onClick={async () => {
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/close`,
-            { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (res.ok) {
-            toast({ title: "Pull request closed!", status: "info" });
-            // Reîncarcă lista de PR-uri
-          } else {
-            toast({ title: "Close failed", status: "error" });
-          }
-        } catch {
-          toast({ title: "Server error", status: "error" });
-        }
-      }}
-    >
-      Reject
-    </Button>
-  </>
-)}
-    </HStack>
-  </Box>
-))}
+        {pullRequests.slice(0, 5).map(pr => (
+          <Box key={pr._id} p={3} bg="white" borderRadius="md" borderWidth={1}>
+            <HStack justify="space-between">
+              <Box>
+                <Text fontWeight="bold">{pr.title}</Text>
+                <Text fontSize="sm" color="gray.600">
+                  {pr.sourceBranch} → {pr.targetBranch} &middot; by {pr.author?.name || pr.author?.email}
+                </Text>
+              </Box>
+              <Badge colorScheme={
+                pr.status === "open" ? "green" : pr.status === "merged" ? "blue" : "red"
+              }>
+                {pr.status}
+              </Badge>
+              {repo?.owner?._id === userId && pr.status === "open" && (
+                <>
+                  <Button
+                    size="xs"
+                    colorScheme="teal"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(
+                          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/merge`,
+                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (res.ok) {
+                          toast({ title: "Pull request merged!", status: "success" });
+                        } else {
+                          toast({ title: "Merge failed", status: "error" });
+                        }
+                      } catch {
+                        toast({ title: "Server error", status: "error" });
+                      }
+                    }}
+                    mr={2}
+                  >
+                    Merge
+                  </Button>
+                  <Button
+                    size="xs"
+                    colorScheme="red"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(
+                          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/close`,
+                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (res.ok) {
+                          toast({ title: "Pull request closed!", status: "info" });
+                        } else {
+                          toast({ title: "Close failed", status: "error" });
+                        }
+                      } catch {
+                        toast({ title: "Server error", status: "error" });
+                      }
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </>
+              )}
+            </HStack>
+          </Box>
+        ))}
 
         {/* Edit file modal */}
         <Modal isOpen={!!editingFile} onClose={handleCancelEdit} size="xl">
@@ -461,62 +537,66 @@ const RepositoryViewPage: React.FC = () => {
         </Modal>
 
         {/* Drag & Drop Upload and Commit */}
-        <Heading size="sm" mb={2}>Upload & Commit a File (Drag & Drop)</Heading>
-        <Box
-          borderWidth={2}
-          borderStyle="dashed"
-          borderColor={dragActive ? "teal.400" : "gray.300"}
-          borderRadius="md"
-          p={8}
-          textAlign="center"
-          mb={4}
-          bg={dragActive ? "teal.50" : "gray.50"}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          cursor="pointer"
-          onClick={() => inputRef.current?.click()}
-        >
-          <Icon as={FaUpload} boxSize={8} color="teal.400" mb={2} />
-          <Text>
-            {selectedFile
-              ? `Selected file: ${selectedFile.name}`
-              : "Drag and drop a file here, or click to select"}
-          </Text>
-          <Input
-            ref={inputRef}
-            type="file"
-            display="none"
-            onChange={handleFileChange}
-          />
-        </Box>
-        {selectedFile && (
-          <VStack align="stretch" spacing={2} mb={4}>
-            <Input
-              value={commitMessage}
-              onChange={e => setCommitMessage(e.target.value)}
-              placeholder="Commit message"
-              isRequired
-            />
-            <Button
-              colorScheme="teal"
-              onClick={handleUploadAndCommit}
-              isLoading={uploading}
+        {canEdit && (
+          <>
+            <Heading size="sm" mb={2}>Upload & Commit a File (Drag & Drop)</Heading>
+            <Box
+              borderWidth={2}
+              borderStyle="dashed"
+              borderColor={dragActive ? "teal.400" : "gray.300"}
+              borderRadius="md"
+              p={8}
+              textAlign="center"
+              mb={4}
+              bg={dragActive ? "teal.50" : "gray.50"}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              cursor="pointer"
+              onClick={() => inputRef.current?.click()}
             >
-              Commit File
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              colorScheme="gray"
-              onClick={() => {
-                setSelectedFile(null);
-                setCommitMessage('');
-              }}
-            >
-              Cancel
-            </Button>
-          </VStack>
+              <Icon as={FaUpload} boxSize={8} color="teal.400" mb={2} />
+              <Text>
+                {selectedFile
+                  ? `Selected file: ${selectedFile.name}`
+                  : "Drag and drop a file here, or click to select"}
+              </Text>
+              <Input
+                ref={inputRef}
+                type="file"
+                display="none"
+                onChange={handleFileChange}
+              />
+            </Box>
+            {selectedFile && (
+              <VStack align="stretch" spacing={2} mb={4}>
+                <Input
+                  value={commitMessage}
+                  onChange={e => setCommitMessage(e.target.value)}
+                  placeholder="Commit message"
+                  isRequired
+                />
+                <Button
+                  colorScheme="teal"
+                  onClick={handleUploadAndCommit}
+                  isLoading={uploading}
+                >
+                  Commit File
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  colorScheme="gray"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setCommitMessage('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </VStack>
+            )}
+          </>
         )}
 
         {/* Activity Timeline */}
