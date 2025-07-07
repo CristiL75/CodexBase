@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge
+  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge, Progress, Tooltip
 } from '@chakra-ui/react';
-import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy } from 'react-icons/fa';
+import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie } from 'react-icons/fa';
 import { useParams } from 'react-router-dom';
 
 const RepositoryViewPage: React.FC = () => {
@@ -26,6 +26,9 @@ const RepositoryViewPage: React.FC = () => {
   const [pullRequests, setPullRequests] = useState<any[]>([]);
   const [pullRequestsLoading, setPullRequestsLoading] = useState(false);
   const [viewingFile, setViewingFile] = useState<any>(null);
+    const [langStats, setLangStats] = useState<Record<string, number>>({});
+  const [langStatsLoading, setLangStatsLoading] = useState(true);
+
 
   // Token for CLI
   const token = localStorage.getItem('token');
@@ -37,6 +40,22 @@ const RepositoryViewPage: React.FC = () => {
     userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
   } catch {}
 
+    useEffect(() => {
+    const fetchLangStats = async () => {
+      setLangStatsLoading(true);
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/lang-stats`
+        );
+        const data = await res.json();
+        setLangStats(data);
+      } catch {
+        setLangStats({});
+      }
+      setLangStatsLoading(false);
+    };
+    fetchLangStats();
+  }, [repoId, files.length]);
   // Fetch repo, branches, PRs
   useEffect(() => {
     const fetchRepo = async () => {
@@ -334,6 +353,32 @@ const RepositoryViewPage: React.FC = () => {
   return (
     <Box minH="100vh" w="100vw" bg="gray.50" py={10} px={0}>
       <Box maxW="900px" mx="auto" bg="white" borderRadius="lg" boxShadow="lg" p={8}>
+        {/* Language Stats Section */}
+        <Box mb={8}>
+          <HStack mb={2}>
+            <Icon as={FaChartPie} color="teal.500" />
+            <Heading size="sm">Language Statistics</Heading>
+          </HStack>
+          {langStatsLoading ? (
+            <Spinner size="sm" />
+          ) : Object.keys(langStats).length === 0 ? (
+            <Text color="gray.400">No code detected.</Text>
+          ) : (
+            <VStack align="stretch" spacing={2}>
+              {Object.entries(langStats)
+                .sort((a, b) => b[1] - a[1])
+                .map(([lang, percent]) => (
+                  <HStack key={lang}>
+                    <Tooltip label={lang} placement="top">
+                      <Text w="120px" fontWeight="bold" isTruncated>{lang}</Text>
+                    </Tooltip>
+                    <Progress value={percent} colorScheme="teal" flex="1" borderRadius="md" />
+                    <Text w="40px" textAlign="right">{percent}%</Text>
+                  </HStack>
+                ))}
+            </VStack>
+          )}
+        </Box>
         {/* Branch selector */}
         <HStack mb={6}>
           <Text fontWeight="bold">Branch:</Text>

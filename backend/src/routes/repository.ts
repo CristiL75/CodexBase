@@ -7,6 +7,7 @@ import { File } from "../models/File";
 import { Invitation } from '../models/Invitation';
 import { Commit } from "../models/Commit";
 import { PullRequest } from "../models/PullRequest";
+import { getLanguageStats } from '../utils/detectLanguageStats';
 
 const router = express.Router();
 
@@ -547,6 +548,13 @@ router.get("/activity/recent", authenticateJWT, async (req, res) => {
   } catch {
     res.status(500).json({ message: "Server error" });
   }
+});
+
+router.get('/:repoId/lang-stats', authenticateJWToptional, async (req, res) => {
+  const repoId = req.params.repoId;
+  const files = await File.find({ repository: repoId }).select('name content').lean();
+  const stats = getLanguageStats(files);
+  res.json(stats);
 });
 
 export default router;
