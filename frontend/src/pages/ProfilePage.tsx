@@ -22,14 +22,17 @@ import {
   ModalHeader,
   ModalCloseButton,
   ModalBody,
+  ModalFooter,
   List,
   ListItem,
   Link as ChakraLink,
   useDisclosure,
   Code,
   Tooltip,
+  Textarea,
+  Button,
 } from '@chakra-ui/react';
-import { FaUserFriends, FaStar, FaCodeBranch, FaCalendarAlt, FaUserShield, FaClock } from 'react-icons/fa';
+import { FaUserFriends, FaStar, FaCodeBranch, FaCalendarAlt, FaUserShield, FaClock, FaEdit } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
 const ProfilePage: React.FC = () => {
@@ -56,6 +59,18 @@ const ProfilePage: React.FC = () => {
     onClose: onFollowingClose,
   } = useDisclosure();
 
+  // About Me edit state
+  const [isEditingBio, setIsEditingBio] = useState(false);
+  const [bioDraft, setBioDraft] = useState('');
+  const [bioSaving, setBioSaving] = useState(false);
+
+  // Get logged in user id for edit rights
+  let loggedUserId = '';
+  try {
+    const token = localStorage.getItem('token');
+    loggedUserId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
+  } catch {}
+
   useEffect(() => {
     const fetchProfile = async () => {
       setLoading(true);
@@ -66,6 +81,7 @@ const ProfilePage: React.FC = () => {
         });
         const data = await res.json();
         setProfile(data);
+        setBioDraft(data.bio || '');
       } catch {
         setProfile(null);
       }
@@ -183,6 +199,27 @@ const ProfilePage: React.FC = () => {
     return days;
   }
 
+  // Save About Me (bio)
+  const handleSaveBio = async () => {
+    setBioSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ bio: bioDraft }),
+      });
+      if (res.ok) {
+        setProfile({ ...profile, bio: bioDraft });
+        setIsEditingBio(false);
+      }
+    } catch {}
+    setBioSaving(false);
+  };
+
   if (loading) {
     return (
       <Flex align="center" justify="center" minH="100vh" w="100vw">
@@ -228,11 +265,56 @@ const ProfilePage: React.FC = () => {
               <Badge colorScheme="green" ml={2}>2FA Enabled</Badge>
             )}
           </HStack>
-          {profile.bio && (
-            <Text mt={2} color="gray.600" fontStyle="italic">{profile.bio}</Text>
-          )}
+        </Box>
+        {/* About Me Section */}
+        <Box mt={4} ml={{ md: 8 }}>
+          <HStack align="center" mb={2}>
+            <Heading size="md">About Me</Heading>
+            {profile._id === loggedUserId && (
+              <Button
+                size="xs"
+                leftIcon={<FaEdit />}
+                variant="ghost"
+                colorScheme="teal"
+                onClick={() => {
+                  setBioDraft(profile.bio || '');
+                  setIsEditingBio(true);
+                }}
+              >
+                {profile.bio ? "Edit" : "Add"}
+              </Button>
+            )}
+          </HStack>
+          <Text color="gray.700" fontSize="md" whiteSpace="pre-line">
+            {profile.bio ? profile.bio : "No description yet."}
+          </Text>
         </Box>
       </Flex>
+
+      {/* Edit About Me Modal */}
+      <Modal isOpen={isEditingBio} onClose={() => setIsEditingBio(false)} size="md">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Edit About Me</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Textarea
+              value={bioDraft}
+              onChange={e => setBioDraft(e.target.value)}
+              placeholder="Write something about yourself..."
+              rows={5}
+            />
+          </ModalBody>
+          <ModalFooter>
+            <Button colorScheme="teal" mr={3} onClick={handleSaveBio} isLoading={bioSaving}>
+              Save
+            </Button>
+            <Button variant="ghost" onClick={() => setIsEditingBio(false)}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       <Divider mb={10} />
 

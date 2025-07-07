@@ -39,6 +39,39 @@ router.get('/profile', authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// Update About Me (bio) for current user
+router.patch('/profile', authenticateJWT, async (req: any, res) => {
+  try {
+    const { bio } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { bio },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      roles: user.roles,
+      is2FAEnabled: user.is2FAEnabled,
+      bio: user.bio,
+      followers: user.followers.length,
+      following: user.following.length,
+      starred: user.starredRepositories.length,
+      createdAt: user.createdAt,
+      lastCommitAt: user.lastCommitAt,
+      commits: user.commits,
+      dailyCommitLimit: user.dailyCommitLimit,
+      repositories: await Repository.countDocuments({ owner: user._id })
+    });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 router.get('/:userId/activity-calendar', authenticateJWT, async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.params.userId);
