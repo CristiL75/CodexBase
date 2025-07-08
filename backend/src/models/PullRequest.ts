@@ -9,5 +9,8 @@ const PullRequestSchema = new Schema({
   description: String,
   status: { type: String, enum: ["open", "closed", "merged"], default: "open" },
   createdAt: { type: Date, default: Date.now },
+  aiFeedback: { type: String },
+  aiSummary: { type: String },
+    diff: { type: String },
 });
 export const PullRequest = mongoose.models.PullRequest || mongoose.model("PullRequest", PullRequestSchema);

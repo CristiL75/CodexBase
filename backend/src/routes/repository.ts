@@ -8,6 +8,7 @@ import { Invitation } from '../models/Invitation';
 import { Commit } from "../models/Commit";
 import { PullRequest } from "../models/PullRequest";
 import { getLanguageStats } from '../utils/detectLanguageStats';
+import axios from 'axios';
 
 const router = express.Router();
 
@@ -334,6 +335,33 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
       return res.status(403).json({ message: "You do not have permission to create pull requests" });
     }
 
+    // Generează diff simplu între sourceBranch și targetBranch
+    const sourceFiles = await File.find({ repository: repoId, branch: sourceBranch }).lean();
+    const targetFiles = await File.find({ repository: repoId, branch: targetBranch }).lean();
+
+    // Creează un map pentru targetFiles pentru acces rapid
+    const targetMap = new Map(targetFiles.map(f => [f.name, f.content]));
+
+    let diff = '';
+    for (const file of sourceFiles) {
+      const targetContent = targetMap.get(file.name);
+      if (targetContent === undefined) {
+        diff += `\n--- New file: ${file.name} ---\n${file.content}\n`;
+      } else if (file.content !== targetContent) {
+        diff += `\n--- Modified file: ${file.name} ---\n`;
+        diff += `--- Old content ---\n${targetContent}\n`;
+        diff += `--- New content ---\n${file.content}\n`;
+      }
+      // Dacă fișierul există și e identic, nu adăuga nimic
+    }
+    // Fișiere șterse
+    const sourceNames = new Set(sourceFiles.map(f => f.name));
+    for (const file of targetFiles) {
+      if (!sourceNames.has(file.name)) {
+        diff += `\n--- Deleted file: ${file.name} ---\n${file.content}\n`;
+      }
+    }
+
     const pr = await PullRequest.create({
       repository: repoId,
       sourceBranch,
@@ -341,6 +369,7 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req, res) => {
       author: req.user.id,
       title,
       description,
+      diff, // <-- salvează diff-ul aici
     });
     res.status(201).json(pr);
   } catch {
@@ -555,6 +584,113 @@ router.get('/:repoId/lang-stats', authenticateJWToptional, async (req, res) => {
   const files = await File.find({ repository: repoId }).select('name content').lean();
   const stats = getLanguageStats(files);
   res.json(stats);
+});
+
+router.post('/:repoId/ai-review', authenticateJWT, async (req, res) => {
+  try {
+    const { diff, prId } = req.body;
+    if (!diff || !prId) return res.status(400).json({ message: "Missing code diff or PR id" });
+
+    // Prompt pentru Mistral
+    const prompt = `Analyze this code diff and return feedback on potential bugs, performance, and best practices.\n\n${diff}`;
+
+    // Trimite la Mistral local (API compatibil OpenAI)
+    const mistralRes = await axios.post('http://127.0.0.1:11434/v1/chat/completions', {
+      model: "mistral", // sau modelul tău
+      messages: [
+        { role: "system", content: "You are a senior code reviewer." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 1024,
+      temperature: 0.2
+    });
+
+    const aiFeedback = mistralRes.data.choices?.[0]?.message?.content || "No feedback.";
+
+    // Salvează feedback-ul AI în PullRequest
+    await PullRequest.findByIdAndUpdate(prId, { aiFeedback });
+
+    res.json({ feedback: aiFeedback });
+  } catch (err) {
+    console.error("AI review error:", err);
+    res.status(500).json({ message: "AI review failed" });
+  }
+});
+
+router.post('/:repoId/ai-summary', authenticateJWT, async (req, res) => {
+  try {
+    const { diff, prId } = req.body;
+    if (!diff || !prId) return res.status(400).json({ message: "Missing code diff or PR id" });
+
+    const prompt = `Summarize the following code diff in a few sentences, highlighting the main changes and their purpose:\n\n${diff}`;
+
+    const mistralRes = await axios.post('http://127.0.0.1:11434/v1/chat/completions', {
+      model: "mistral",
+      messages: [
+        { role: "system", content: "You are a senior software engineer." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 512,
+      temperature: 0.3
+    });
+
+    const aiSummary = mistralRes.data.choices?.[0]?.message?.content || "No summary.";
+    await PullRequest.findByIdAndUpdate(prId, { aiSummary });
+    res.json({ summary: aiSummary });
+  } catch (err) {
+    console.error("AI summary error:", err);
+    res.status(500).json({ message: "AI summary failed" });
+  }
+});
+
+router.post('/:repoId/ai-explain-file', authenticateJWT, async (req, res) => {
+  try {
+    const { fileContent, fileName } = req.body;
+    if (!fileContent || !fileName) return res.status(400).json({ message: "Missing file content or name" });
+
+    const prompt = `Explain in simple terms what the following file (${fileName}) does:\n\n${fileContent}`;
+
+    const mistralRes = await axios.post('http://127.0.0.1:11434/v1/chat/completions', {
+      model: "mistral",
+      messages: [
+        { role: "system", content: "You are a helpful programming assistant." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 512,
+      temperature: 0.3
+    });
+
+    const aiExplanation = mistralRes.data.choices?.[0]?.message?.content || "No explanation.";
+    res.json({ explanation: aiExplanation });
+  } catch (err) {
+    console.error("AI explain error:", err);
+    res.status(500).json({ message: "AI explain failed" });
+  }
+});
+
+router.post('/:repoId/ai-commit-message', authenticateJWT, async (req, res) => {
+  try {
+    const { diff } = req.body;
+    if (!diff) return res.status(400).json({ message: "Missing code diff" });
+
+    const prompt = `Suggest a concise and descriptive commit message for the following code diff:\n\n${diff}`;
+
+    const mistralRes = await axios.post('http://127.0.0.1:11434/v1/chat/completions', {
+      model: "mistral",
+      messages: [
+        { role: "system", content: "You are a senior developer." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 100,
+      temperature: 0.2
+    });
+
+    const aiCommitMsg = mistralRes.data.choices?.[0]?.message?.content || "No suggestion.";
+    res.json({ commitMessage: aiCommitMsg });
+  } catch (err) {
+    console.error("AI commit message error:", err);
+    res.status(500).json({ message: "AI commit message failed" });
+  }
 });
 
 export default router;

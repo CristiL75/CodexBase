@@ -2,8 +2,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge, Progress, Tooltip
 } from '@chakra-ui/react';
-import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie } from 'react-icons/fa';
+import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie, FaRobot, FaLightbulb } from 'react-icons/fa';
+//                                                                                                 ^^^^^^^^^^  ^^^^^^^^^^^
 import { useParams } from 'react-router-dom';
+
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -28,6 +30,18 @@ const RepositoryViewPage: React.FC = () => {
   const [viewingFile, setViewingFile] = useState<any>(null);
     const [langStats, setLangStats] = useState<Record<string, number>>({});
   const [langStatsLoading, setLangStatsLoading] = useState(true);
+
+  const [aiExplainLoading, setAiExplainLoading] = useState(false);
+  const [aiExplain, setAiExplain] = useState<string | null>(null);
+  const [aiExplainFile, setAiExplainFile] = useState<any>(null);
+  const [aiCommitMsgLoading, setAiCommitMsgLoading] = useState(false);
+  const [aiCommitMsg, setAiCommitMsg] = useState<string | null>(null);
+  const [aiReviewFeedback, setAiReviewFeedback] = useState<{ [prId: string]: string | null }>({});
+const [aiSummary, setAiSummary] = useState<{ [prId: string]: string | null }>({});
+const [aiReviewLoading, setAiReviewLoading] = useState<{ [prId: string]: boolean }>({});
+const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boolean }>({});
+
+  // ..
 
 
   // Token for CLI
@@ -333,6 +347,99 @@ const RepositoryViewPage: React.FC = () => {
   const handleCloseViewFile = () => {
     setViewingFile(null);
   };
+
+   const handleAIReview = async (pr: any) => {
+  setAiReviewLoading(prev => ({ ...prev, [pr._id]: true }));
+  setAiReviewFeedback(prev => ({ ...prev, [pr._id]: null }));
+  if (!(pr.diff || pr.diffText) || !pr._id) {
+    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI review." }));
+    setAiReviewLoading(prev => ({ ...prev, [pr._id]: false }));
+    return;
+  }
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-review`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ diff: pr.diff || pr.diffText, prId: pr._id }),
+    });
+    const data = await res.json();
+    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: data.feedback }));
+  } catch {
+    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "AI review failed." }));
+  }
+  setAiReviewLoading(prev => ({ ...prev, [pr._id]: false }));
+};
+
+const handleAISummary = async (pr: any) => {
+  setAiSummaryLoading(prev => ({ ...prev, [pr._id]: true }));
+  setAiSummary(prev => ({ ...prev, [pr._id]: null }));
+  if (!(pr.diff || pr.diffText) || !pr._id) {
+    setAiSummary(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI summary." }));
+    setAiSummaryLoading(prev => ({ ...prev, [pr._id]: false }));
+    return;
+  }
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-summary`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ diff: pr.diff || pr.diffText || '', prId: pr._id }),
+    });
+    const data = await res.json();
+    setAiSummary(prev => ({ ...prev, [pr._id]: data.summary }));
+  } catch {
+    setAiSummary(prev => ({ ...prev, [pr._id]: "AI summary failed." }));
+  }
+  setAiSummaryLoading(prev => ({ ...prev, [pr._id]: false }));
+};
+ 
+
+   const handleAIExplainFile = async (file: any) => {
+    setAiExplainLoading(true);
+    setAiExplainFile(file);
+    setAiExplain(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-explain-file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ fileContent: file.content, fileName: file.name }),
+      });
+      const data = await res.json();
+      setAiExplain(data.explanation);
+    } catch {
+      setAiExplain("AI explanation failed.");
+    }
+    setAiExplainLoading(false);
+  };
+
+ const handleAICommitMsg = async (diff: string) => {
+    setAiCommitMsgLoading(true);
+    setAiCommitMsg(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-commit-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ diff }),
+      });
+      const data = await res.json();
+      setAiCommitMsg(data.commitMessage);
+    } catch {
+      setAiCommitMsg("AI commit message failed.");
+    }
+    setAiCommitMsgLoading(false);
+  };
+
 
   if (loading) {
     return (
@@ -643,6 +750,108 @@ const RepositoryViewPage: React.FC = () => {
             )}
           </>
         )}
+           {/* AI Section */}
+        <Box mb={8}>
+          <HStack mb={2}>
+            <Icon as={FaRobot} color="teal.500" />
+            <Heading size="sm">AI-powered Tools</Heading>
+          </HStack>
+          <VStack align="stretch" spacing={3}>
+            {/* AI Review for PR */}
+            {pullRequests.length > 0 && (
+              <Box>
+                <Text fontWeight="bold" mb={1}>AI Review for Pull Requests</Text>
+                {pullRequests.map(pr => (
+                  <Box key={pr._id} mb={2} p={3} borderWidth={1} borderRadius="md" bg="gray.50">
+                    <HStack>
+                      <Text fontWeight="bold">{pr.title}</Text>
+                      <Button
+                        size="xs"
+                        colorScheme="teal"
+                        leftIcon={<FaRobot />}
+                        isLoading={!!aiReviewLoading[pr._id]}
+                        onClick={() => handleAIReview(pr)}
+                        >
+                        AI Review
+                        </Button>
+                     <Button
+                        size="xs"
+                        colorScheme="blue"
+                        leftIcon={<FaLightbulb />}
+                        isLoading={!!aiSummaryLoading[pr._id]}
+                        onClick={() => handleAISummary(pr)}
+                        >
+                        AI Summary
+                        </Button>
+                    </HStack>
+                   {aiReviewFeedback[pr._id] && (
+                    <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                        <Text fontWeight="bold" color="teal.700">AI Review:</Text>
+                        <Text fontSize="sm" whiteSpace="pre-line">{aiReviewFeedback[pr._id]}</Text>
+                    </Box>
+                    )}
+                    {aiSummary[pr._id] && (
+                    <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                        <Text fontWeight="bold" color="blue.700">AI Summary:</Text>
+                        <Text fontSize="sm" whiteSpace="pre-line">{aiSummary[pr._id]}</Text>
+                    </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+            {/* AI Explain File */}
+            {files.length > 0 && (
+              <Box>
+                <Text fontWeight="bold" mb={1}>AI Explain File</Text>
+                <HStack flexWrap="wrap" spacing={2}>
+                  {files.slice(0, 5).map(file => (
+                    <Button
+                      key={file._id}
+                      size="xs"
+                      colorScheme="purple"
+                      leftIcon={<FaRobot />}
+                      isLoading={aiExplainLoading && aiExplainFile?._id === file._id}
+                      onClick={() => handleAIExplainFile(file)}
+                    >
+                      {file.name}
+                    </Button>
+                  ))}
+                </HStack>
+                {aiExplain && aiExplainFile && (
+                  <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                    <Text fontWeight="bold" color="purple.700">AI Explanation for {aiExplainFile.name}:</Text>
+                    <Text fontSize="sm" whiteSpace="pre-line">{aiExplain}</Text>
+                  </Box>
+                )}
+              </Box>
+            )}
+            {/* AI Commit Message Suggestion */}
+            <Box>
+              <Text fontWeight="bold" mb={1}>AI Commit Message Suggestion</Text>
+              <Button
+                size="xs"
+                colorScheme="orange"
+                leftIcon={<FaLightbulb />}
+                isLoading={aiCommitMsgLoading}
+                onClick={() => handleAICommitMsg(
+                  commits.length > 0 && commits[0].files && commits[0].files[0]?.content
+                    ? commits[0].files[0].content
+                    : "Example diff"
+                )}
+              >
+                Suggest Commit Message
+              </Button>
+              {aiCommitMsg && (
+                <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                  <Text fontWeight="bold" color="orange.700">AI Commit Message:</Text>
+                  <Text fontSize="sm" whiteSpace="pre-line">{aiCommitMsg}</Text>
+                </Box>
+              )}
+            </Box>
+          </VStack>
+        </Box>
+
 
         {/* Activity Timeline */}
         <Box mt={10} mb={6} p={6} bg="gray.50" borderRadius="lg" borderWidth={1} boxShadow="sm">
@@ -682,6 +891,7 @@ const RepositoryViewPage: React.FC = () => {
             </VStack>
           )}
         </Box>
+
 
         {/* CLI USAGE SECTION */}
         <Box mt={12} p={6} borderWidth={1} borderRadius="lg" bg="gray.50">
