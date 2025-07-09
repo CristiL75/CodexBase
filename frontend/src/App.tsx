@@ -21,6 +21,9 @@ import NewRepositoryPage from './pages/NewRepositoryPage';
 import RepositoriesPage from './pages/RepositoriesPage';
 import NotificationsPage from './pages/NotificationsPage';
 import RepositoryPullRequestsPage from './pages/RepositoryPullRequestsPage';
+import OrganizationListPage from './pages/OrganizationListPage';
+import OrganizationCreatePage from './pages/OrganizationCreatePage';
+import OrganizationDetailPage from './pages/OrganizationDetailPage';
 
 
 function App() {
@@ -36,6 +39,9 @@ function App() {
             <Route path="/2fa-verify" element={<TwoFAVerify />} />
             <Route path="/auth/success" element={<AuthCallback />} />
             <Route path="/explore" element={<ExplorePage />} /> {/* <-- Adăugat aici */}
+               
+           
+
 
             {/* Rute protejate */}
             <Route element={<ProtectedRoute />}>
@@ -49,6 +55,9 @@ function App() {
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/profile/:userId" element={<UserProfilePage />} />
               <Route path="/repository/:repoId/pulls" element={<RepositoryPullRequestsPage />} />
+               <Route path="/organizations" element={<OrganizationListPage />} />
+              <Route path="/organizations/new" element={<OrganizationCreatePage />} />
+              <Route path="/organizations/:orgId" element={<OrganizationDetailPage />} />
             </Route>
             
             {/* Rută implicită - redirecționează spre login */}

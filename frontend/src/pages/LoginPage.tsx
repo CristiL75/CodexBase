@@ -29,6 +29,7 @@ const LoginPage: React.FC = () => {
   const [tempToken, setTempToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [require2FASetup, setRequire2FASetup] = useState(false);
 
   // Pentru regenerare QR
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -76,11 +77,12 @@ const LoginPage: React.FC = () => {
 
       // Dacă backend-ul cere 2FA, setează tokenul și arată formularul de cod
       if (data.require2FA || data.require2FASetup) {
-        setShow2FA(true);
-        setTempToken(data.tempToken);
-        setLoading(false);
-        return;
-      }
+      setShow2FA(true);
+      setTempToken(data.tempToken);
+      setRequire2FASetup(!!data.require2FASetup); // <-- adaugă asta
+      setLoading(false);
+      return;
+    }
 
       // Dacă login-ul e complet fără 2FA, salvează tokenul și navighează
       if (data.token) {
@@ -132,6 +134,8 @@ const LoginPage: React.FC = () => {
         localStorage.setItem('token', data.token);
         // Dacă ai context de autentificare, decomentează linia de mai jos
         // setToken(data.token);
+          const payload = JSON.parse(atob(data.token.split('.')[1]));
+  localStorage.setItem('userId', payload.id);
         navigate('/');
       } else if (res.ok && data.success) {
         navigate('/');
@@ -301,15 +305,17 @@ const LoginPage: React.FC = () => {
                           </Button>
                         </VStack>
                       </form>
-                      <Button
-                        colorScheme="orange"
-                        variant="outline"
-                        onClick={handleRegenerate2FAQr}
-                        isLoading={loading}
-                        mt={4}
-                      >
-                        Regenerate 2FA QR Code
-                      </Button>
+                      {show2FA && (
+  <Button
+    colorScheme="orange"
+    variant="outline"
+    onClick={handleRegenerate2FAQr}
+    isLoading={loading}
+    mt={4}
+  >
+    Regenerate 2FA QR Code
+  </Button>
+)}
                       {showQR && qrUrl && (
                         <Box textAlign="center" mt={4}>
                           <Text mb={2}>Scan this QR code with your authenticator app:</Text>

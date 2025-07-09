@@ -9,6 +9,8 @@ import userRoutes from "./routes/user";
 import authRoutes from "./routes/auth";
 import repositoryRoutes from "./routes/repository"; // <-- importă ruta pentru repository
 import invitationRoutes from './routes/invitation';
+import organizationRoutes from "./routes/organization";
+import orgInvitationRoutes from "./routes/org-invitation";
 
 dotenv.config();
 const app = express();
@@ -20,6 +22,8 @@ app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/repository", repositoryRoutes); 
 app.use('/invitation', invitationRoutes);
+app.use("/organization", organizationRoutes);
+app.use("/org-invitation", orgInvitationRoutes);
 // <-- adaugă ruta pentru repository
 
 app.get("/", (_, res) => {

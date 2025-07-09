@@ -9,6 +9,7 @@ import { Commit } from "../models/Commit";
 import { PullRequest } from "../models/PullRequest";
 import { getLanguageStats } from '../utils/detectLanguageStats';
 import Comment from "../models/Comment";
+
 import axios from 'axios';
 
 const router = express.Router();
@@ -88,6 +89,22 @@ router.get("/my", authenticateJWT, async (req: any, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+router.get("/repositories", authenticateJWT, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const repos = await Repository.find({
+      $or: [
+        { owner: userId },
+        { collaborators: userId }
+      ]
+    });
+    res.json(repos);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 // Marchează/demarchează stea pe repo
 router.post("/star/:id", authenticateJWT, async (req: any, res) => {
@@ -734,5 +751,6 @@ router.get("/pull-request/:prId/comments", authenticateJWToptional, async (req, 
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 export default router;
