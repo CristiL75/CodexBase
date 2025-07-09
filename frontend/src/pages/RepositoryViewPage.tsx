@@ -6,6 +6,8 @@ import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartP
 //                                                                                                 ^^^^^^^^^^  ^^^^^^^^^^^
 import { useParams } from 'react-router-dom';
 
+import { useDisclosure } from '@chakra-ui/react';
+
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -40,8 +42,11 @@ const RepositoryViewPage: React.FC = () => {
 const [aiSummary, setAiSummary] = useState<{ [prId: string]: string | null }>({});
 const [aiReviewLoading, setAiReviewLoading] = useState<{ [prId: string]: boolean }>({});
 const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boolean }>({});
+  const [comments, setComments] = useState<{ [prId: string]: any[] }>({});
+  const [commentInputs, setCommentInputs] = useState<{ [prId: string]: string }>({});
+  const [commentsLoading, setCommentsLoading] = useState<{ [prId: string]: boolean }>({});
+  const [commentsOpen, setCommentsOpen] = useState<{ [prId: string]: boolean }>({});
 
-  // ..
 
 
   // Token for CLI
@@ -440,6 +445,49 @@ const handleAISummary = async (pr: any) => {
     setAiCommitMsgLoading(false);
   };
 
+ const fetchComments = async (prId: string) => {
+    setCommentsLoading(prev => ({ ...prev, [prId]: true }));
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${prId}/comments`,
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+      );
+      const data = await res.json();
+      setComments(prev => ({ ...prev, [prId]: Array.isArray(data) ? data : [] }));
+    } catch {
+      setComments(prev => ({ ...prev, [prId]: [] }));
+    }
+    setCommentsLoading(prev => ({ ...prev, [prId]: false }));
+  };
+
+  // Add comment to a PR
+  const handleAddComment = async (prId: string) => {
+    const content = commentInputs[prId]?.trim();
+    if (!content) return;
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${prId}/comment`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content }),
+        }
+      );
+      if (res.ok) {
+        setCommentInputs(prev => ({ ...prev, [prId]: "" }));
+        fetchComments(prId);
+      } else {
+        toast({ title: "Failed to add comment", status: "error" });
+      }
+    } catch {
+      toast({ title: "Server error", status: "error" });
+    }
+  };
+
+
 
   if (loading) {
     return (
@@ -605,6 +653,63 @@ const handleAISummary = async (pr: any) => {
                   {pr.sourceBranch} → {pr.targetBranch} &middot; by {pr.author?.name || pr.author?.email}
                 </Text>
               </Box>
+              <Box mt={3}>
+  <Button
+    size="xs"
+    variant="outline"
+    colorScheme="gray"
+    onClick={() => {
+      setCommentsOpen(prev => ({ ...prev, [pr._id]: !prev[pr._id] }));
+      if (!comments[pr._id]) fetchComments(pr._id);
+    }}
+  >
+    {commentsOpen[pr._id] ? "Hide Comments" : "Show Comments"}
+  </Button>
+  {commentsOpen[pr._id] && (
+    <Box mt={2} bg="gray.50" borderRadius="md" p={2}>
+      {commentsLoading[pr._id] ? (
+        <Spinner size="sm" />
+      ) : (
+        <>
+          {comments[pr._id]?.length === 0 ? (
+            <Text color="gray.400" fontSize="sm">No comments yet.</Text>
+          ) : (
+            <VStack align="stretch" spacing={1} mb={2}>
+              {comments[pr._id].map((c: any) => (
+                <Box key={c._id} p={2} bg="white" borderRadius="md" borderWidth={1}>
+                  <Text fontSize="sm" fontWeight="bold">{c.author?.name || c.author?.email || "User"}</Text>
+                  <Text fontSize="sm">{c.content}</Text>
+                  <Text fontSize="xs" color="gray.500">{new Date(c.createdAt).toLocaleString()}</Text>
+                </Box>
+              ))}
+            </VStack>
+          )}
+          {canEdit && (
+            <HStack mt={2}>
+              <Input
+                size="sm"
+                placeholder="Add a comment..."
+                value={commentInputs[pr._id] || ""}
+                onChange={e => setCommentInputs(prev => ({ ...prev, [pr._id]: e.target.value }))}
+                onKeyDown={e => {
+                  if (e.key === "Enter") handleAddComment(pr._id);
+                }}
+              />
+              <Button
+                size="sm"
+                colorScheme="teal"
+                onClick={() => handleAddComment(pr._id)}
+                isDisabled={!commentInputs[pr._id]?.trim()}
+              >
+                Comment
+              </Button>
+            </HStack>
+          )}
+        </>
+      )}
+    </Box>
+  )}
+</Box>
               <Badge colorScheme={
                 pr.status === "open" ? "green" : pr.status === "merged" ? "blue" : "red"
               }>
@@ -660,7 +765,9 @@ const handleAISummary = async (pr: any) => {
               )}
             </HStack>
           </Box>
+          
         ))}
+        
 
         {/* Edit file modal */}
         <Modal isOpen={!!editingFile} onClose={handleCancelEdit} size="xl">

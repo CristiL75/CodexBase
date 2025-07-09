@@ -8,6 +8,7 @@ import { Invitation } from '../models/Invitation';
 import { Commit } from "../models/Commit";
 import { PullRequest } from "../models/PullRequest";
 import { getLanguageStats } from '../utils/detectLanguageStats';
+import Comment from "../models/Comment";
 import axios from 'axios';
 
 const router = express.Router();
@@ -690,6 +691,47 @@ router.post('/:repoId/ai-commit-message', authenticateJWT, async (req, res) => {
   } catch (err) {
     console.error("AI commit message error:", err);
     res.status(500).json({ message: "AI commit message failed" });
+  }
+});
+
+router.post("/pull-request/:prId/comment", authenticateJWT, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ message: "Missing comment content" });
+
+    const pr = await PullRequest.findById(req.params.prId);
+    if (!pr) return res.status(404).json({ message: "PR not found" });
+
+    // Verifică dacă userul e colaborator sau owner pe repo
+    const repo = await Repository.findById(pr.repository);
+    if (!repo || !isUserCollaborator(repo, req)) {
+      return res.status(403).json({ message: "You do not have permission to comment on this PR" });
+    }
+
+    const comment = await Comment.create({
+      prId: pr._id,
+      author: req.user.id,
+      content,
+    });
+
+    res.status(201).json(comment);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Listare comentarii pentru un PR
+router.get("/pull-request/:prId/comments", authenticateJWToptional, async (req, res) => {
+  try {
+    const pr = await PullRequest.findById(req.params.prId);
+    if (!pr) return res.status(404).json({ message: "PR not found" });
+
+    const comments = await Comment.find({ prId: pr._id })
+      .sort({ createdAt: 1 })
+      .populate("author", "name email avatar");
+    res.json(comments);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
   }
 });
 
