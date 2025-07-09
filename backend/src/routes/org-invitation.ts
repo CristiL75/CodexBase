@@ -16,12 +16,23 @@ router.get("/my", authenticateJWT, async (req, res) => {
   }
 });
 // Trimite invitație (doar owner)
+// ...existing code...
 router.post("/:orgId/invite", authenticateJWT, async (req, res) => {
   try {
     const { userId } = req.body;
     const org = await Organization.findById(req.params.orgId);
     if (!org) return res.status(404).json({ message: "Organization not found" });
     if (org.owner.toString() !== req.user.id) return res.status(403).json({ message: "Only owner can invite" });
+
+    // Nu permite invitarea ownerului
+    if (org.owner.toString() === userId) {
+      return res.status(400).json({ message: "Owner cannot be invited" });
+    }
+
+    // Nu permite invitarea unui membru deja existent
+    if (org.members.map((m: any) => m.toString()).includes(userId)) {
+      return res.status(400).json({ message: "User is already a member of the organization" });
+    }
 
     // Verifică dacă există deja invitație
     const existing = await OrgInvitation.findOne({ user: userId, organization: org._id, status: "pending" });
@@ -33,7 +44,7 @@ router.post("/:orgId/invite", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
+// ...existing code...
 // Acceptă invitația
 router.post("/:invitationId/accept", authenticateJWT, async (req, res) => {
   try {
