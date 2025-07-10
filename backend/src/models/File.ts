@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IFile extends Document {
   repository: mongoose.Types.ObjectId;
+  branch: string;
   name: string;
   content: string;
   createdAt: Date;

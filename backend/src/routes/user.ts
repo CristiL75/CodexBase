@@ -1,5 +1,5 @@
 import express from "express";
-import { authenticateJWT } from "./auth"; // sau importă corect dacă e în altă parte
+import { authenticateJWT } from "./auth";
 import { User } from "../models/User";
 import { Repository } from '../models/Repository';
 import { FollowNotification } from "../models/FollowNotification";
@@ -12,14 +12,15 @@ const router = express.Router();
 router.get('/profile', authenticateJWT, async (req: any, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
 
-    // Numără repo-urile unde userul este owner
     const repoCount = await Repository.countDocuments({ owner: user._id });
 
-  
     res.json({
-      _id: user._id, 
+      _id: user._id,
       name: user.name,
       email: user.email,
       avatar: user.avatar,
@@ -49,7 +50,10 @@ router.patch('/profile', authenticateJWT, async (req: any, res) => {
       { bio },
       { new: true }
     );
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
     res.json({
       _id: user._id,
       name: user.name,
@@ -92,10 +96,12 @@ router.get('/:userId/activity-calendar', authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 router.post('/find', authenticateJWT, async (req, res) => {
   const { query } = req.body;
   if (!query || typeof query !== 'string' || query.length < 2) {
-    return res.status(400).json({ message: "Query too short" });
+    res.status(400).json({ message: "Query too short" });
+    return;
   }
 
   const users = await User.find({
@@ -104,28 +110,32 @@ router.post('/find', authenticateJWT, async (req, res) => {
       { username: { $regex: query, $options: 'i' } }
     ]
   }).select('_id name email username avatar');
-  if (!users.length) return res.status(404).json({ message: "No users found" });
+  if (!users.length) {
+    res.status(404).json({ message: "No users found" });
+    return;
+  }
   res.json({ users });
 });
 
 router.get('/my-follows', authenticateJWT, async (req: any, res) => {
-  console.log("Am intrat în /user/my-follows cu user id:", req.user.id);
   try {
     const notifications = await FollowNotification.find({ to: req.user.id })
       .sort({ createdAt: -1 })
       .populate('from', '_id name email avatar');
     res.json({ notifications });
   } catch (err) {
-    console.error("Eroare la /user/my-follows:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 router.get('/:userId', async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).select('-password');
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
 
-    // Numără repo-urile unde userul este owner
     const repoCount = await Repository.countDocuments({ owner: user._id });
 
     res.json({
@@ -159,27 +169,28 @@ router.get('/:userId/commits', authenticateJWT, async (req, res) => {
 router.post('/:userId/follow', authenticateJWT, async (req: any, res) => {
   try {
     const userToFollow = await User.findById(req.params.userId);
-    if (!userToFollow) return res.status(404).json({ message: "User not found" });
-
-    // Nu poți da follow la tine
-    if (userToFollow._id.equals(req.user.id)) {
-      return res.status(400).json({ message: "You cannot follow yourself" });
+    if (!userToFollow) {
+      res.status(404).json({ message: "User not found" });
+      return;
     }
 
-    // Dacă deja îl urmărești, nu mai adăuga încă o dată
+    if (String(userToFollow._id) === String(req.user.id)) {
+      res.status(400).json({ message: "You cannot follow yourself" });
+      return;
+    }
+
     if (userToFollow.followers.includes(req.user.id)) {
-      return res.status(400).json({ message: "Already following" });
+      res.status(400).json({ message: "Already following" });
+      return;
     }
 
     userToFollow.followers.push(req.user.id);
     await userToFollow.save();
 
-    // Adaugă și la following pentru userul logat
     await User.findByIdAndUpdate(req.user.id, {
       $addToSet: { following: userToFollow._id }
     });
 
-    // Creează notificare de follow
     await FollowNotification.create({
       to: userToFollow._id,
       from: req.user.id
@@ -194,22 +205,24 @@ router.post('/:userId/follow', authenticateJWT, async (req: any, res) => {
 router.post('/:userId/unfollow', authenticateJWT, async (req: any, res) => {
   try {
     const userToUnfollow = await User.findById(req.params.userId);
-    if (!userToUnfollow) return res.status(404).json({ message: "User not found" });
-
-    // Nu poți da unfollow la tine
-    if (userToUnfollow._id.equals(req.user.id)) {
-      return res.status(400).json({ message: "You cannot unfollow yourself" });
+    if (!userToUnfollow) {
+      res.status(404).json({ message: "User not found" });
+      return;
     }
 
-    // Dacă nu îl urmărești, nu poți da unfollow
+    if (String(userToUnfollow._id) === String(req.user.id)) {
+      res.status(400).json({ message: "You cannot unfollow yourself" });
+      return;
+    }
+
     if (!userToUnfollow.followers.includes(req.user.id)) {
-      return res.status(400).json({ message: "You are not following this user" });
+      res.status(400).json({ message: "You are not following this user" });
+      return;
     }
 
     userToUnfollow.followers = userToUnfollow.followers.filter((id: any) => id.toString() !== req.user.id);
     await userToUnfollow.save();
 
-    // Scoate și din following pentru userul logat (opțional)
     await User.findByIdAndUpdate(req.user.id, {
       $pull: { following: userToUnfollow._id }
     });
@@ -224,7 +237,10 @@ router.get('/:userId/followers', authenticateJWT, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId)
       .populate('followers', '_id name email avatar');
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
     res.json({ followers: user.followers });
   } catch {
     res.status(500).json({ message: "Server error" });
@@ -235,7 +251,10 @@ router.get('/:userId/following', authenticateJWT, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId)
       .populate('following', '_id name email avatar');
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
     res.json({ following: user.following });
   } catch {
     res.status(500).json({ message: "Server error" });
@@ -245,7 +264,6 @@ router.get('/:userId/following', authenticateJWT, async (req, res) => {
 router.get("/:userId/activity", authenticateJWT, async (req, res) => {
   try {
     const userId = req.params.userId;
-    // Ultimele 14 zile de commit-uri
     const since = new Date();
     since.setDate(since.getDate() - 13);
     const commits = await Commit.find({
@@ -253,7 +271,6 @@ router.get("/:userId/activity", authenticateJWT, async (req, res) => {
       createdAt: { $gte: since }
     }).sort({ createdAt: -1 }).lean();
 
-    // Ultimele 3 repo-uri publice în care userul a avut commit
     const repoIds = [...new Set(commits.map(c => c.repository.toString()))];
     const recentRepos = await Repository.find({
       _id: { $in: repoIds },
@@ -265,5 +282,4 @@ router.get("/:userId/activity", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 export default router;

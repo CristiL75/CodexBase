@@ -12,14 +12,18 @@ router.post("/:repoId/invite", authenticateJWT, async (req: any, res) => {
     const repoId = req.params.repoId;
     const repo = await Repository.findById(repoId);
 
-    if (!repo) return res.status(404).json({ message: "Repository not found" });
+    if (!repo) {
+      res.status(404).json({ message: "Repository not found" });
+      return;
+    }
 
     // Doar owner sau colaborator poate invita
     if (
       repo.owner.toString() !== req.user.id &&
       !repo.collaborators.some((id: any) => id.toString() === req.user.id)
     ) {
-      return res.status(403).json({ message: "Not allowed" });
+      res.status(403).json({ message: "Not allowed" });
+      return;
     }
 
     // Nu adăuga de două ori același user ca invitat sau colaborator
@@ -33,7 +37,8 @@ router.post("/:repoId/invite", authenticateJWT, async (req: any, res) => {
       repo.owner.toString() === userId ||
       existingInvitation
     ) {
-      return res.status(400).json({ message: "User is already a collaborator, owner, or already invited" });
+      res.status(400).json({ message: "User is already a collaborator, owner, or already invited" });
+      return;
     }
 
     await Invitation.create({
@@ -63,7 +68,10 @@ router.get("/my", authenticateJWT, async (req: any, res) => {
 router.post("/:invitationId/accept", authenticateJWT, async (req: any, res) => {
   try {
     const invitation = await Invitation.findOne({ _id: req.params.invitationId, user: req.user.id, status: "pending" });
-    if (!invitation) return res.status(404).json({ message: "Invitation not found" });
+    if (!invitation) {
+      res.status(404).json({ message: "Invitation not found" });
+      return;
+    }
 
     invitation.status = "accepted";
     await invitation.save();
@@ -81,7 +89,10 @@ router.post("/:invitationId/accept", authenticateJWT, async (req: any, res) => {
 router.post("/:invitationId/decline", authenticateJWT, async (req: any, res) => {
   try {
     const invitation = await Invitation.findOne({ _id: req.params.invitationId, user: req.user.id, status: "pending" });
-    if (!invitation) return res.status(404).json({ message: "Invitation not found" });
+    if (!invitation) {
+      res.status(404).json({ message: "Invitation not found" });
+      return;
+    }
 
     invitation.status = "declined";
     await invitation.save();
