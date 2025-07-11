@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 
 // Definim tipul pentru datele utilizatorului
@@ -30,13 +30,13 @@ interface AuthContextType {
 }
 
 // Creăm contextul
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Hook pentru a utiliza contextul
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth trebuie utilizat în interiorul unui AuthProvider');
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
@@ -51,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [tempEmail, setTempEmail] = useState<string | null>(null);
 
   // URL de bază API
-  const API_URL = 'http://localhost:3000/api'; // ajustează portul după nevoie
+  const API_URL = 'http://localhost:5000'; // 👈 ACTUALIZAT URL-ul pentru backend-ul tău
 
   // Configurare axios cu token
   useEffect(() => {
@@ -114,8 +114,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         is2FAEnabled: response.data.is2FAEnabled || false
       });
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred during login');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'An error occurred during login');
+      } else {
+        setError('An error occurred during login');
+      }
     } finally {
       setLoading(false);
     }
@@ -161,8 +165,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setNeeds2FAVerification(false);
       setTempEmail(null);
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Invalid 2FA code');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'Invalid 2FA code');
+      } else {
+        setError('Invalid 2FA code');
+      }
     } finally {
       setLoading(false);
     }
@@ -174,8 +182,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await axios.post(`${API_URL}/auth/2fa/setup`);
       return response.data;
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to setup 2FA');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'Failed to setup 2FA');
+      } else {
+        setError('Failed to setup 2FA');
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -191,8 +203,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Actualizăm starea user să reflecte activarea 2FA
       setUser(prev => prev ? {...prev, is2FAEnabled: true} : null);
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to verify 2FA code');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'Failed to verify 2FA code');
+      } else {
+        setError('Failed to verify 2FA code');
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -208,8 +224,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Actualizăm starea user să reflecte dezactivarea 2FA
       setUser(prev => prev ? {...prev, is2FAEnabled: false} : null);
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to disable 2FA');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'Failed to disable 2FA');
+      } else {
+        setError('Failed to disable 2FA');
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -222,8 +242,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await axios.post(`${API_URL}/auth/2fa/generate-backup-codes`);
       return response.data.backupCodes;
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to generate backup codes');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || 'Failed to generate backup codes');
+      } else {
+        setError('Failed to generate backup codes');
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -252,7 +276,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setup2FA,
     confirm2FA,
     disable2FA,
-    setToken,
     generateBackupCodes,
     logout,
     setTemp2FAEmail

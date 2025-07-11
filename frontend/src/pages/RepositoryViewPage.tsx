@@ -1,13 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge, Progress, Tooltip
+  Box, Heading, Text, Button, VStack, Input, HStack, Icon, useToast, Spinner, Code, useClipboard, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Textarea, Badge, Progress, Tooltip, List, ListItem, Avatar, Alert, AlertIcon
 } from '@chakra-ui/react';
-import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie, FaRobot, FaLightbulb } from 'react-icons/fa';
-//                                                                                                 ^^^^^^^^^^  ^^^^^^^^^^^
+import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie, FaRobot, FaLightbulb, FaUserPlus, FaTimes } from 'react-icons/fa';
 import { useParams } from 'react-router-dom';
-
 import { useDisclosure } from '@chakra-ui/react';
-
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -30,7 +27,7 @@ const RepositoryViewPage: React.FC = () => {
   const [pullRequests, setPullRequests] = useState<any[]>([]);
   const [pullRequestsLoading, setPullRequestsLoading] = useState(false);
   const [viewingFile, setViewingFile] = useState<any>(null);
-    const [langStats, setLangStats] = useState<Record<string, number>>({});
+  const [langStats, setLangStats] = useState<Record<string, number>>({});
   const [langStatsLoading, setLangStatsLoading] = useState(true);
 
   const [aiExplainLoading, setAiExplainLoading] = useState(false);
@@ -39,15 +36,19 @@ const RepositoryViewPage: React.FC = () => {
   const [aiCommitMsgLoading, setAiCommitMsgLoading] = useState(false);
   const [aiCommitMsg, setAiCommitMsg] = useState<string | null>(null);
   const [aiReviewFeedback, setAiReviewFeedback] = useState<{ [prId: string]: string | null }>({});
-const [aiSummary, setAiSummary] = useState<{ [prId: string]: string | null }>({});
-const [aiReviewLoading, setAiReviewLoading] = useState<{ [prId: string]: boolean }>({});
-const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boolean }>({});
+  const [aiSummary, setAiSummary] = useState<{ [prId: string]: string | null }>({});
+  const [aiReviewLoading, setAiReviewLoading] = useState<{ [prId: string]: boolean }>({});
+  const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boolean }>({});
   const [comments, setComments] = useState<{ [prId: string]: any[] }>({});
   const [commentInputs, setCommentInputs] = useState<{ [prId: string]: string }>({});
   const [commentsLoading, setCommentsLoading] = useState<{ [prId: string]: boolean }>({});
   const [commentsOpen, setCommentsOpen] = useState<{ [prId: string]: boolean }>({});
 
-
+  // 🎯 INVITE LOGIC DIN CODUL TAU
+  const [inviteInput, setInviteInput] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Token for CLI
   const token = localStorage.getItem('token');
@@ -59,7 +60,69 @@ const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boole
     userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
   } catch {}
 
-    useEffect(() => {
+  // 🎯 INVITE FUNCTIONS DIN CODUL TAU
+  // Caută utilizatori după username/email și afișează lista
+  const handleSearchUsers = async (value: string) => {
+    setInviteInput(value);
+    setSearchResults([]);
+    if (!value || value.length < 2) return;
+    setSearching(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/find`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ query: value }),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.users) {
+        setSearchResults(data.users);
+      } else {
+        setSearchResults([]);
+      }
+    } catch {
+      setSearchResults([]);
+    }
+    setSearching(false);
+  };
+
+  // Invită utilizatorul selectat din listă
+  const handleInviteUser = async (userId: string) => {
+    setInviteLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const resInvite = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/${repoId}/invite`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ userId }),
+        }
+      );
+      if (resInvite.ok) {
+        toast({ title: "User invited!", status: "success" });
+        setInviteInput('');
+        setSearchResults([]);
+      } else {
+        const err = await resInvite.json();
+        toast({ title: err.message || "Error inviting user", status: "error" });
+      }
+    } catch {
+      toast({ title: "Server error", status: "error" });
+    }
+    setInviteLoading(false);
+  };
+
+  useEffect(() => {
     const fetchLangStats = async () => {
       setLangStatsLoading(true);
       try {
@@ -75,6 +138,7 @@ const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boole
     };
     fetchLangStats();
   }, [repoId, files.length]);
+
   // Fetch repo, branches, PRs
   useEffect(() => {
     const fetchRepo = async () => {
@@ -353,58 +417,57 @@ const [aiSummaryLoading, setAiSummaryLoading] = useState<{ [prId: string]: boole
     setViewingFile(null);
   };
 
-   const handleAIReview = async (pr: any) => {
-  setAiReviewLoading(prev => ({ ...prev, [pr._id]: true }));
-  setAiReviewFeedback(prev => ({ ...prev, [pr._id]: null }));
-  if (!(pr.diff || pr.diffText) || !pr._id) {
-    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI review." }));
+  const handleAIReview = async (pr: any) => {
+    setAiReviewLoading(prev => ({ ...prev, [pr._id]: true }));
+    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: null }));
+    if (!(pr.diff || pr.diffText) || !pr._id) {
+      setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI review." }));
+      setAiReviewLoading(prev => ({ ...prev, [pr._id]: false }));
+      return;
+    }
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-review`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ diff: pr.diff || pr.diffText, prId: pr._id }),
+      });
+      const data = await res.json();
+      setAiReviewFeedback(prev => ({ ...prev, [pr._id]: data.feedback }));
+    } catch {
+      setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "AI review failed." }));
+    }
     setAiReviewLoading(prev => ({ ...prev, [pr._id]: false }));
-    return;
-  }
-  try {
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-review`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ diff: pr.diff || pr.diffText, prId: pr._id }),
-    });
-    const data = await res.json();
-    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: data.feedback }));
-  } catch {
-    setAiReviewFeedback(prev => ({ ...prev, [pr._id]: "AI review failed." }));
-  }
-  setAiReviewLoading(prev => ({ ...prev, [pr._id]: false }));
-};
+  };
 
-const handleAISummary = async (pr: any) => {
-  setAiSummaryLoading(prev => ({ ...prev, [pr._id]: true }));
-  setAiSummary(prev => ({ ...prev, [pr._id]: null }));
-  if (!(pr.diff || pr.diffText) || !pr._id) {
-    setAiSummary(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI summary." }));
+  const handleAISummary = async (pr: any) => {
+    setAiSummaryLoading(prev => ({ ...prev, [pr._id]: true }));
+    setAiSummary(prev => ({ ...prev, [pr._id]: null }));
+    if (!(pr.diff || pr.diffText) || !pr._id) {
+      setAiSummary(prev => ({ ...prev, [pr._id]: "No diff or PR id available for AI summary." }));
+      setAiSummaryLoading(prev => ({ ...prev, [pr._id]: false }));
+      return;
+    }
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ diff: pr.diff || pr.diffText || '', prId: pr._id }),
+      });
+      const data = await res.json();
+      setAiSummary(prev => ({ ...prev, [pr._id]: data.summary }));
+    } catch {
+      setAiSummary(prev => ({ ...prev, [pr._id]: "AI summary failed." }));
+    }
     setAiSummaryLoading(prev => ({ ...prev, [pr._id]: false }));
-    return;
-  }
-  try {
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-summary`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ diff: pr.diff || pr.diffText || '', prId: pr._id }),
-    });
-    const data = await res.json();
-    setAiSummary(prev => ({ ...prev, [pr._id]: data.summary }));
-  } catch {
-    setAiSummary(prev => ({ ...prev, [pr._id]: "AI summary failed." }));
-  }
-  setAiSummaryLoading(prev => ({ ...prev, [pr._id]: false }));
-};
- 
+  };
 
-   const handleAIExplainFile = async (file: any) => {
+  const handleAIExplainFile = async (file: any) => {
     setAiExplainLoading(true);
     setAiExplainFile(file);
     setAiExplain(null);
@@ -425,7 +488,7 @@ const handleAISummary = async (pr: any) => {
     setAiExplainLoading(false);
   };
 
- const handleAICommitMsg = async (diff: string) => {
+  const handleAICommitMsg = async (diff: string) => {
     setAiCommitMsgLoading(true);
     setAiCommitMsg(null);
     try {
@@ -445,7 +508,7 @@ const handleAISummary = async (pr: any) => {
     setAiCommitMsgLoading(false);
   };
 
- const fetchComments = async (prId: string) => {
+  const fetchComments = async (prId: string) => {
     setCommentsLoading(prev => ({ ...prev, [prId]: true }));
     try {
       const res = await fetch(
@@ -487,8 +550,6 @@ const handleAISummary = async (pr: any) => {
     }
   };
 
-
-
   if (loading) {
     return (
       <Box minH="60vh" display="flex" alignItems="center" justifyContent="center">
@@ -508,6 +569,55 @@ const handleAISummary = async (pr: any) => {
   return (
     <Box minH="100vh" w="100vw" bg="gray.50" py={10} px={0}>
       <Box maxW="900px" mx="auto" bg="white" borderRadius="lg" boxShadow="lg" p={8}>
+        
+        {/* Repository Header */}
+        <Box mb={6}>
+          <Heading size="lg" mb={2}>{repo.name}</Heading>
+          <Text color="gray.600" mb={2}>{repo.description}</Text>
+          <Text fontSize="sm" color="gray.500">
+            Owner: <strong>{repo.owner?.name || repo.owner?.email}</strong>
+            {repo.isPrivate && <Badge ml={2} colorScheme="red">Private</Badge>}
+          </Text>
+        </Box>
+
+        {/* 🎯 INVITE COLLABORATORS SECTION DIN CODUL TAU (doar pentru owner) */}
+        {repo.owner?._id === userId && (
+          <Box mb={8}>
+            <Heading size="sm" mb={2}>Invite user to repository</Heading>
+            <VStack align="stretch" spacing={2}>
+              <Input
+                value={inviteInput}
+                onChange={e => handleSearchUsers(e.target.value)}
+                placeholder="Username or email"
+                isRequired
+                autoComplete="off"
+              />
+              {searching && <Text color="gray.400" fontSize="sm">Searching...</Text>}
+              {searchResults.length > 0 && (
+                <List spacing={1} borderWidth={1} borderRadius="md" borderColor="gray.200" maxH="180px" overflowY="auto" bg="gray.50">
+                  {searchResults.map(user => (
+                    <ListItem
+                      key={user._id}
+                      _hover={{ bg: "gray.100", cursor: "pointer" }}
+                      px={3}
+                      py={2}
+                      display="flex"
+                      alignItems="center"
+                      onClick={() => handleInviteUser(user._id)}
+                    >
+                      <Avatar src={user.avatar} name={user.name || user.username} size="sm" mr={2} />
+                      <Box>
+                        <Text fontWeight="bold">{user.name || user.username}</Text>
+                        <Text fontSize="xs" color="gray.500">{user.email}</Text>
+                      </Box>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </VStack>
+          </Box>
+        )}
+
         {/* Language Stats Section */}
         <Box mb={8}>
           <HStack mb={2}>
@@ -534,6 +644,7 @@ const handleAISummary = async (pr: any) => {
             </VStack>
           )}
         </Box>
+
         {/* Branch selector */}
         <HStack mb={6}>
           <Text fontWeight="bold">Branch:</Text>
@@ -654,62 +765,62 @@ const handleAISummary = async (pr: any) => {
                 </Text>
               </Box>
               <Box mt={3}>
-  <Button
-    size="xs"
-    variant="outline"
-    colorScheme="gray"
-    onClick={() => {
-      setCommentsOpen(prev => ({ ...prev, [pr._id]: !prev[pr._id] }));
-      if (!comments[pr._id]) fetchComments(pr._id);
-    }}
-  >
-    {commentsOpen[pr._id] ? "Hide Comments" : "Show Comments"}
-  </Button>
-  {commentsOpen[pr._id] && (
-    <Box mt={2} bg="gray.50" borderRadius="md" p={2}>
-      {commentsLoading[pr._id] ? (
-        <Spinner size="sm" />
-      ) : (
-        <>
-          {comments[pr._id]?.length === 0 ? (
-            <Text color="gray.400" fontSize="sm">No comments yet.</Text>
-          ) : (
-            <VStack align="stretch" spacing={1} mb={2}>
-              {comments[pr._id].map((c: any) => (
-                <Box key={c._id} p={2} bg="white" borderRadius="md" borderWidth={1}>
-                  <Text fontSize="sm" fontWeight="bold">{c.author?.name || c.author?.email || "User"}</Text>
-                  <Text fontSize="sm">{c.content}</Text>
-                  <Text fontSize="xs" color="gray.500">{new Date(c.createdAt).toLocaleString()}</Text>
-                </Box>
-              ))}
-            </VStack>
-          )}
-          {canEdit && (
-            <HStack mt={2}>
-              <Input
-                size="sm"
-                placeholder="Add a comment..."
-                value={commentInputs[pr._id] || ""}
-                onChange={e => setCommentInputs(prev => ({ ...prev, [pr._id]: e.target.value }))}
-                onKeyDown={e => {
-                  if (e.key === "Enter") handleAddComment(pr._id);
-                }}
-              />
-              <Button
-                size="sm"
-                colorScheme="teal"
-                onClick={() => handleAddComment(pr._id)}
-                isDisabled={!commentInputs[pr._id]?.trim()}
-              >
-                Comment
-              </Button>
-            </HStack>
-          )}
-        </>
-      )}
-    </Box>
-  )}
-</Box>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorScheme="gray"
+                  onClick={() => {
+                    setCommentsOpen(prev => ({ ...prev, [pr._id]: !prev[pr._id] }));
+                    if (!comments[pr._id]) fetchComments(pr._id);
+                  }}
+                >
+                  {commentsOpen[pr._id] ? "Hide Comments" : "Show Comments"}
+                </Button>
+                {commentsOpen[pr._id] && (
+                  <Box mt={2} bg="gray.50" borderRadius="md" p={2}>
+                    {commentsLoading[pr._id] ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <>
+                        {comments[pr._id]?.length === 0 ? (
+                          <Text color="gray.400" fontSize="sm">No comments yet.</Text>
+                        ) : (
+                          <VStack align="stretch" spacing={1} mb={2}>
+                            {comments[pr._id].map((c: any) => (
+                              <Box key={c._id} p={2} bg="white" borderRadius="md" borderWidth={1}>
+                                <Text fontSize="sm" fontWeight="bold">{c.author?.name || c.author?.email || "User"}</Text>
+                                <Text fontSize="sm">{c.content}</Text>
+                                <Text fontSize="xs" color="gray.500">{new Date(c.createdAt).toLocaleString()}</Text>
+                              </Box>
+                            ))}
+                          </VStack>
+                        )}
+                        {canEdit && (
+                          <HStack mt={2}>
+                            <Input
+                              size="sm"
+                              placeholder="Add a comment..."
+                              value={commentInputs[pr._id] || ""}
+                              onChange={e => setCommentInputs(prev => ({ ...prev, [pr._id]: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === "Enter") handleAddComment(pr._id);
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              colorScheme="teal"
+                              onClick={() => handleAddComment(pr._id)}
+                              isDisabled={!commentInputs[pr._id]?.trim()}
+                            >
+                              Comment
+                            </Button>
+                          </HStack>
+                        )}
+                      </>
+                    )}
+                  </Box>
+                )}
+              </Box>
               <Badge colorScheme={
                 pr.status === "open" ? "green" : pr.status === "merged" ? "blue" : "red"
               }>
@@ -765,9 +876,7 @@ const handleAISummary = async (pr: any) => {
               )}
             </HStack>
           </Box>
-          
         ))}
-        
 
         {/* Edit file modal */}
         <Modal isOpen={!!editingFile} onClose={handleCancelEdit} size="xl">
@@ -857,7 +966,8 @@ const handleAISummary = async (pr: any) => {
             )}
           </>
         )}
-           {/* AI Section */}
+
+        {/* AI Section */}
         <Box mb={8}>
           <HStack mb={2}>
             <Icon as={FaRobot} color="teal.500" />
@@ -878,30 +988,30 @@ const handleAISummary = async (pr: any) => {
                         leftIcon={<FaRobot />}
                         isLoading={!!aiReviewLoading[pr._id]}
                         onClick={() => handleAIReview(pr)}
-                        >
+                      >
                         AI Review
-                        </Button>
-                     <Button
+                      </Button>
+                      <Button
                         size="xs"
                         colorScheme="blue"
                         leftIcon={<FaLightbulb />}
                         isLoading={!!aiSummaryLoading[pr._id]}
                         onClick={() => handleAISummary(pr)}
-                        >
+                      >
                         AI Summary
-                        </Button>
+                      </Button>
                     </HStack>
-                   {aiReviewFeedback[pr._id] && (
-                    <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                    {aiReviewFeedback[pr._id] && (
+                      <Box mt={2} p={2} bg="gray.100" borderRadius="md">
                         <Text fontWeight="bold" color="teal.700">AI Review:</Text>
                         <Text fontSize="sm" whiteSpace="pre-line">{aiReviewFeedback[pr._id]}</Text>
-                    </Box>
+                      </Box>
                     )}
                     {aiSummary[pr._id] && (
-                    <Box mt={2} p={2} bg="gray.100" borderRadius="md">
+                      <Box mt={2} p={2} bg="gray.100" borderRadius="md">
                         <Text fontWeight="bold" color="blue.700">AI Summary:</Text>
                         <Text fontSize="sm" whiteSpace="pre-line">{aiSummary[pr._id]}</Text>
-                    </Box>
+                      </Box>
                     )}
                   </Box>
                 ))}
@@ -959,7 +1069,6 @@ const handleAISummary = async (pr: any) => {
           </VStack>
         </Box>
 
-
         {/* Activity Timeline */}
         <Box mt={10} mb={6} p={6} bg="gray.50" borderRadius="lg" borderWidth={1} boxShadow="sm">
           <Heading size="sm" mb={4}>Repository Activity</Heading>
@@ -998,7 +1107,6 @@ const handleAISummary = async (pr: any) => {
             </VStack>
           )}
         </Box>
-
 
         {/* CLI USAGE SECTION */}
         <Box mt={12} p={6} borderWidth={1} borderRadius="lg" bg="gray.50">
@@ -1093,6 +1201,7 @@ const handleAISummary = async (pr: any) => {
             * Make sure you are in the folder where you want to run these commands.
           </Text>
         </Box>
+        
         <Box mb={6}>
           <HStack align="start">
             <Box flex="1" maxW="80%">

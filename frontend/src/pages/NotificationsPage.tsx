@@ -1,52 +1,164 @@
-// ...existing imports...
 import { useEffect, useState } from 'react';
-import { Box, Heading, Text, Button, VStack, Spinner } from '@chakra-ui/react';
+import { Box, Heading, Text, Button, VStack, Spinner, HStack, useToast, AlertDialog, AlertDialogOverlay, AlertDialogContent, AlertDialogHeader, AlertDialogBody, AlertDialogFooter, useDisclosure } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
+import { useNotifications } from '../contexts/NotificationContext';
+import { FaTrash, FaTrashAlt } from 'react-icons/fa';
+import { useRef } from 'react';
 
 const NotificationsPage: React.FC = () => {
-  const [invitations, setInvitations] = useState<any[]>([]);
-  const [orgInvitations, setOrgInvitations] = useState<any[]>([]);
-  const [followNotifications, setFollowNotifications] = useState<any[]>([]);
+  const { refreshNotifications } = useNotifications();
+  
+  type Invitation = {
+    _id: string;
+    repository?: { name: string };
+  };
+  
+  type OrgInvitation = {
+    _id: string;
+    organization?: { name: string };
+  };
+  
+  type FollowNotification = {
+    _id: string;
+    from: { _id: string; name?: string; email?: string };
+  };
+  
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [orgInvitations, setOrgInvitations] = useState<OrgInvitation[]>([]);
+  const [followNotifications, setFollowNotifications] = useState<FollowNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingAll, setDeletingAll] = useState(false);
   const navigate = useNavigate();
+  const toast = useToast();
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const fetchNotifications = async () => {
       setLoading(true);
       const token = localStorage.getItem('token');
       try {
-        // Repo invitations
-        const resInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const dataInv = await resInv.json();
-        setInvitations(dataInv.invitations || []);
+        console.log('🔍 Fetching notifications...');
 
-        // Org invitations
-        const resOrgInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const dataOrgInv = await resOrgInv.json();
-        setOrgInvitations(dataOrgInv.invitations || []);
-
-        // Follow notifications
-        const resFollow = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/my-follows`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!resFollow.ok) {
-          const errText = await resFollow.text();
-          throw new Error(`Status: ${resFollow.status} - ${errText}`);
+        // 📋 REPO INVITATIONS - SAFE FETCH
+        try {
+          const resInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/my`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resInv.ok) {
+            const dataInv = await resInv.json();
+            console.log('📋 Repo invitations:', dataInv);
+            setInvitations(dataInv.invitations || []);
+          } else {
+            console.log('📋 No repo invitations or endpoint not available');
+            setInvitations([]);
+          }
+        } catch (err) {
+          console.log('📋 Repo invitations fetch failed:', err);
+          setInvitations([]);
         }
-        const dataFollow = await resFollow.json();
-        setFollowNotifications(dataFollow.notifications || []);
+
+        // 🏢 ORG INVITATIONS - SAFE FETCH
+        try {
+          const resOrgInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/my`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resOrgInv.ok) {
+            const dataOrgInv = await resOrgInv.json();
+            console.log('🏢 Org invitations:', dataOrgInv);
+            setOrgInvitations(dataOrgInv.invitations || []);
+          } else {
+            console.log('🏢 No org invitations or endpoint not available');
+            setOrgInvitations([]);
+          }
+        } catch (err) {
+          console.log('🏢 Org invitations fetch failed:', err);
+          setOrgInvitations([]);
+        }
+
+        // 👥 FOLLOW NOTIFICATIONS - SAFE FETCH
+        try {
+          const resFollow = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/my-follows`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resFollow.ok) {
+            const dataFollow = await resFollow.json();
+            console.log('👥 Follow notifications:', dataFollow);
+            setFollowNotifications(dataFollow.notifications || []);
+          } else {
+            console.log('👥 No follow notifications or endpoint error');
+            setFollowNotifications([]);
+          }
+        } catch (err) {
+          console.log('👥 Follow notifications fetch failed:', err);
+          setFollowNotifications([]);
+        }
+        
       } catch (err) {
-        console.error("Eroare la fetch notifications:", err);
-        alert("Eroare la fetch notifications: " + err);
+        console.error("❌ General error fetching notifications:", err);
       }
       setLoading(false);
     };
+    
     fetchNotifications();
   }, []);
+
+  // 🗑️ ȘTERGE O FOLLOW NOTIFICATION SPECIFICĂ
+  const handleDeleteFollowNotification = async (notificationId: string) => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/follow-notification/${notificationId}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (response.ok) {
+        console.log(`✅ Follow notification ${notificationId} deleted`);
+        setFollowNotifications(followNotifications.filter(notif => notif._id !== notificationId));
+        refreshNotifications();
+        toast({ title: "Notification deleted", status: "success", duration: 2000 });
+      } else {
+        toast({ title: "Failed to delete notification", status: "error" });
+      }
+    } catch (error) {
+      console.error(`❌ Error deleting follow notification:`, error);
+      toast({ title: "Server error", status: "error" });
+    }
+  };
+
+  // 🗑️ ȘTERGE TOATE NOTIFICĂRILE (follow + invitations)
+  const handleDeleteAllNotifications = async () => {
+    setDeletingAll(true);
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/mark-all-notifications-read`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (response.ok) {
+        console.log('✅ All notifications deleted');
+        setFollowNotifications([]);
+        setInvitations([]);
+        setOrgInvitations([]);
+        refreshNotifications();
+        toast({ title: "All notifications deleted", status: "success", duration: 2000 });
+      } else {
+        toast({ title: "Failed to delete all notifications", status: "error" });
+      }
+    } catch (error) {
+      console.error('❌ Error deleting all notifications:', error);
+      toast({ title: "Server error", status: "error" });
+    }
+    setDeletingAll(false);
+    onClose();
+  };
 
   const handleAction = async (id: string, action: "accept" | "decline", type: "repo" | "org") => {
     const token = localStorage.getItem('token');
@@ -54,77 +166,196 @@ const NotificationsPage: React.FC = () => {
       type === "repo"
         ? `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/${id}/${action}`
         : `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/${id}/${action}`;
-    await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (type === "repo") {
-      setInvitations(invitations.filter(inv => inv._id !== id));
-    } else {
-      setOrgInvitations(orgInvitations.filter(inv => inv._id !== id));
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        console.log(`✅ ${action} successful for ${type} invitation ${id}`);
+        
+        // Actualizează local state-ul
+        if (type === "repo") {
+          setInvitations(invitations.filter(inv => inv._id !== id));
+        } else {
+          setOrgInvitations(orgInvitations.filter(inv => inv._id !== id));
+        }
+        
+        // Actualizează count-ul din context
+        refreshNotifications();
+        toast({ 
+          title: `Invitation ${action}ed`, 
+          status: action === "accept" ? "success" : "info", 
+          duration: 2000 
+        });
+      } else {
+        console.error(`❌ Failed to ${action} ${type} invitation:`, response.status);
+        const errorData = await response.text();
+        console.error('Error details:', errorData);
+        toast({ title: `Failed to ${action} invitation`, status: "error" });
+      }
+    } catch (error) {
+      console.error(`❌ Error handling ${action} for ${type} invitation:`, error);
+      toast({ title: "Server error", status: "error" });
     }
   };
 
-  if (loading) return <Spinner />;
+  if (loading) {
+    return (
+      <Box minH="100vh" w="100vw" bg="gray.50" py={10} px={0}>
+        <Box maxW="700px" mx="auto" bg="white" borderRadius="lg" boxShadow="lg" p={8}>
+          <VStack spacing={4}>
+            <Spinner size="xl" />
+            <Text>Loading notifications...</Text>
+          </VStack>
+        </Box>
+      </Box>
+    );
+  }
+
+  const totalNotifications = followNotifications.length + invitations.length + orgInvitations.length;
+  console.log('📊 Total notifications to display:', totalNotifications);
 
   return (
     <Box minH="100vh" w="100vw" bg="gray.50" py={10} px={0}>
       <Box maxW="700px" mx="auto" bg="white" borderRadius="lg" boxShadow="lg" p={8}>
-        <Heading mb={6}>Notifications</Heading>
-        <VStack spacing={4} align="stretch">
-          {/* Follow notifications */}
-          {followNotifications.length === 0 && invitations.length === 0 && orgInvitations.length === 0 && (
-            <Text>No notifications.</Text>
+        
+        {/* Header cu buton de ștergere toate */}
+        <HStack justify="space-between" mb={6}>
+          <Heading>Notifications ({totalNotifications})</Heading>
+          {totalNotifications > 0 && (
+            <Button
+              leftIcon={<FaTrashAlt />}
+              colorScheme="red"
+              variant="outline"
+              size="sm"
+              onClick={onOpen}
+            >
+              Delete All
+            </Button>
           )}
-          {followNotifications.map((notif: any) => (
-            <Box key={notif._id} p={4} borderWidth={1} borderRadius="md" bg="gray.50">
-              <Text mb={2}>
-                <b
-                  style={{ color: "#319795", cursor: "pointer" }}
-                  onClick={() => navigate(`/profile/${notif.from._id}`)}
-                >
-                  {notif.from.name || notif.from.email}
-                </b>{" "}
-                started following you!
+        </HStack>
+
+        <VStack spacing={4} align="stretch">
+          {/* No notifications message */}
+          {followNotifications.length === 0 && invitations.length === 0 && orgInvitations.length === 0 && (
+            <Box textAlign="center" py={8}>
+              <Text color="gray.500" fontSize="lg">No notifications.</Text>
+              <Text color="gray.400" fontSize="sm" mt={2}>
+                You'll see follow notifications and invitations here.
               </Text>
-              <Button
-                colorScheme="teal"
-                size="sm"
-                onClick={() => navigate(`/profile/${notif.from._id}`)}
-              >
-                View Profile
-              </Button>
+            </Box>
+          )}
+          
+          {/* Follow notifications */}
+          {followNotifications.map((notif: FollowNotification) => (
+            <Box key={notif._id} p={4} borderWidth={1} borderRadius="md" bg="blue.50">
+              <HStack justify="space-between" align="start">
+                <Box flex="1">
+                  <Text mb={2}>
+                    <b
+                      style={{ color: "#319795", cursor: "pointer" }}
+                      onClick={() => navigate(`/profile/${notif.from._id}`)}
+                    >
+                      {notif.from.name || notif.from.email || 'User'}
+                    </b>{" "}
+                    started following you!
+                  </Text>
+                  <Button
+                    colorScheme="teal"
+                    size="sm"
+                    onClick={() => navigate(`/profile/${notif.from._id}`)}
+                  >
+                    View Profile
+                  </Button>
+                </Box>
+                <Button
+                  leftIcon={<FaTrash />}
+                  colorScheme="red"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDeleteFollowNotification(notif._id)}
+                >
+                  Delete
+                </Button>
+              </HStack>
             </Box>
           ))}
+          
           {/* Repo Invitation notifications */}
           {invitations.map(inv => (
-            <Box key={inv._id} p={4} borderWidth={1} borderRadius="md">
+            <Box key={inv._id} p={4} borderWidth={1} borderRadius="md" bg="green.50">
               <Text mb={2}>
-                You have been invited to <b>{inv.repository?.name}</b>
+                You have been invited to collaborate on <b>{inv.repository?.name || 'a repository'}</b>
               </Text>
-              <Button colorScheme="green" size="sm" mr={2} onClick={() => handleAction(inv._id, "accept", "repo")}>
-                Accept
-              </Button>
-              <Button colorScheme="red" size="sm" onClick={() => handleAction(inv._id, "decline", "repo")}>
-                Decline
-              </Button>
+              <HStack>
+                <Button colorScheme="green" size="sm" mr={2} onClick={() => handleAction(inv._id, "accept", "repo")}>
+                  Accept
+                </Button>
+                <Button colorScheme="red" size="sm" onClick={() => handleAction(inv._id, "decline", "repo")}>
+                  Decline
+                </Button>
+              </HStack>
             </Box>
           ))}
+          
           {/* Organization Invitation notifications */}
           {orgInvitations.map(inv => (
             <Box key={inv._id} p={4} borderWidth={1} borderRadius="md" bg="purple.50">
               <Text mb={2}>
-                You have been invited to join organization <b>{inv.organization?.name}</b>
+                You have been invited to join organization <b>{inv.organization?.name || 'an organization'}</b>
               </Text>
-              <Button colorScheme="green" size="sm" mr={2} onClick={() => handleAction(inv._id, "accept", "org")}>
-                Accept
-              </Button>
-              <Button colorScheme="red" size="sm" onClick={() => handleAction(inv._id, "decline", "org")}>
-                Decline
-              </Button>
+              <HStack>
+                <Button colorScheme="green" size="sm" mr={2} onClick={() => handleAction(inv._id, "accept", "org")}>
+                  Accept
+                </Button>
+                <Button colorScheme="red" size="sm" onClick={() => handleAction(inv._id, "decline", "org")}>
+                  Decline
+                </Button>
+              </HStack>
             </Box>
           ))}
         </VStack>
+
+        {/* Alert Dialog pentru confirmare ștergere toate */}
+        <AlertDialog
+          isOpen={isOpen}
+          leastDestructiveRef={cancelRef}
+          onClose={onClose}
+        >
+          <AlertDialogOverlay>
+            <AlertDialogContent>
+              <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                Delete All Notifications
+              </AlertDialogHeader>
+
+              <AlertDialogBody>
+                Are you sure you want to delete all notifications? This action cannot be undone.
+                <br /><br />
+                <Text fontSize="sm" color="gray.600">
+                  • Follow notifications will be permanently deleted
+                  • Pending invitations will be declined automatically
+                </Text>
+              </AlertDialogBody>
+
+              <AlertDialogFooter>
+                <Button ref={cancelRef} onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button 
+                  colorScheme="red" 
+                  onClick={handleDeleteAllNotifications}
+                  isLoading={deletingAll}
+                  ml={3}
+                >
+                  Delete All
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialogOverlay>
+        </AlertDialog>
       </Box>
     </Box>
   );

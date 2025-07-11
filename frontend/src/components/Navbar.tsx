@@ -1,18 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState } from 'react'; // 👈 ȘTERGE useEffect din import
 import {
-  Box, Flex, Button, Heading, Spacer, Menu, MenuButton, MenuList, MenuItem, IconButton, Input, InputGroup, InputRightElement, List, ListItem
+  Box, Flex, Button, Heading, Spacer, Menu, MenuButton, MenuList, MenuItem, IconButton, Input, InputGroup, InputRightElement, List, ListItem, Badge
 } from '@chakra-ui/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useNotifications } from '../contexts/NotificationContext'; // 👈 ADAUGĂ ACEST IMPORT
 import { FaUser, FaBook, FaCodeBranch, FaBell, FaPlus, FaChevronDown, FaSearch } from 'react-icons/fa';
+
+type UserSearchResult = {
+  _id: string;
+  name?: string;
+  email: string;
+};
 
 const Navbar: React.FC = () => {
   const { isAuthenticated, user, logout } = useAuth();
+  const { notificationCount, markAsRead } = useNotifications(); // 👈 FOLOSEȘTE CONTEXTUL
   const [search, setSearch] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const navigate = useNavigate();
+
+  // 👈 ȘTERGE ÎNTREG useEffect-ul și fetchNotificationCount-ul
+  // 👈 ȘTERGE și [notificationCount, setNotificationCount] din useState
 
   // Caută utilizatori după email sau username
   const handleSearch = async (value: string) => {
@@ -53,6 +64,11 @@ const Navbar: React.FC = () => {
     setSearch('');
     setResults([]);
     navigate(`/profile/${userId}`);
+  };
+
+  const handleNotificationClick = () => {
+    navigate('/notifications');
+    markAsRead(); // 👈 FOLOSEȘTE FUNCȚIA DIN CONTEXT
   };
 
   return (
@@ -157,15 +173,35 @@ const Navbar: React.FC = () => {
               </Button>
             </Link>
           
-            <Link to="/notifications">
+            {/* Notification button with badge */}
+            <Box position="relative" mr={2}>
               <IconButton
                 aria-label="Notifications"
                 icon={<FaBell />}
                 colorScheme="teal"
                 variant="ghost"
-                mr={2}
+                onClick={handleNotificationClick}
               />
-            </Link>
+              {notificationCount > 0 && (
+                <Badge
+                  colorScheme="red"
+                  borderRadius="full"
+                  position="absolute"
+                  top="0"
+                  right="0"
+                  fontSize="xs"
+                  minW="20px"
+                  h="20px"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  transform="translate(50%, -50%)"
+                >
+                  {notificationCount > 99 ? '99+' : notificationCount}
+                </Badge>
+              )}
+            </Box>
+
             <Menu>
               <MenuButton
                 as={Button}

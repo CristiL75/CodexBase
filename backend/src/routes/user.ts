@@ -4,7 +4,10 @@ import { User } from "../models/User";
 import { Repository } from '../models/Repository';
 import { FollowNotification } from "../models/FollowNotification";
 import { Commit } from "../models/Commit";
+import { Invitation } from "../models/Invitation"; // 👈 ADAUGĂ DACĂ NU EXISTĂ
+import { OrgInvitation } from "../models/OrgInvitation"; // 👈 ADAUGĂ DACĂ NU EXISTĂ
 import mongoose from "mongoose";
+
 
 const router = express.Router();
 
@@ -154,6 +157,88 @@ router.get('/:userId', async (req, res) => {
   }
 });
 
+// Adaugă această rută în fișierul user.ts
+
+router.delete('/follow-notification/:notificationId', authenticateJWT, async (req: any, res: any): Promise<void> => {
+  try {
+    const { notificationId } = req.params;
+    const userId = req.user.id;
+    
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" });
+      return;
+    }
+
+    // Verifică că notificația aparține user-ului
+    const notification = await FollowNotification.findOne({ 
+      _id: notificationId, 
+      to: userId 
+    });
+    
+    if (!notification) {
+      res.status(404).json({ message: "Notification not found" });
+      return;
+    }
+
+    await FollowNotification.findByIdAndDelete(notificationId);
+    
+    console.log(`Follow notification ${notificationId} deleted for user ${userId}`);
+    res.json({ message: "Notification deleted" });
+  } catch (error) {
+    console.error('Error deleting follow notification:', error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post('/mark-all-notifications-read', authenticateJWT, async (req: any, res: any): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" });
+      return;
+    }
+
+    console.log(`Starting to delete all notifications for user ${userId}`);
+
+    // Șterge DOAR follow notifications (invitațiile se gestionează separat)
+    const followResult = await FollowNotification.deleteMany({ to: userId });
+    console.log(`Deleted ${followResult.deletedCount} follow notifications`);
+
+    // 👈 COMENTEAZĂ INVITAȚIILE PÂNĂ CÂND MODELELE SUNT IMPLEMENTATE CORECT
+    try {
+      // Repository invitations (le declină automat doar dacă modelul există)
+      if (Invitation) {
+        const repoResult = await Invitation.updateMany(
+          { user: userId, status: "pending" }, 
+          { status: "declined" }
+        );
+        console.log(`Declined ${repoResult.modifiedCount} repo invitations`);
+      }
+    } catch (err) {
+      console.log('Repo invitations model not available:', err);
+    }
+
+    try {
+      // Organization invitations (le declină automat doar dacă modelul există)
+      if (OrgInvitation) {
+        const orgResult = await OrgInvitation.updateMany(
+          { user: userId, status: "pending" }, 
+          { status: "declined" }
+        );
+        console.log(`Declined ${orgResult.modifiedCount} org invitations`);
+      }
+    } catch (err) {
+      console.log('Org invitations model not available:', err);
+    }
+    
+    console.log(`All available notifications processed for user ${userId}`);
+    res.json({ message: "All notifications deleted" });
+  } catch (error) {
+    console.error('Error marking all notifications as read:', error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 router.get('/:userId/commits', authenticateJWT, async (req, res) => {
   try {
     const commits = await Commit.find({ author: req.params.userId })
@@ -282,4 +367,5 @@ router.get("/:userId/activity", authenticateJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 export default router;

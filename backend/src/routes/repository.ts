@@ -44,47 +44,44 @@ function addStarInfo(repo: any, userId?: string): any {
   return repoObj;
 }
 
-// Creează un repository nou
-router.post(
-  "/new",
-  authenticateJWT,
-  [
-    body("name").notEmpty().withMessage("Name is required"),
-    body("description").optional().isString(),
-    body("isPrivate").optional().isBoolean(),
-    body("collaborators").optional().isArray(),
-  ],
-  async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-    try {
-      const userId = getUserId(req);
-      if (!userId) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
-      }
+// 🎯 RUTELE SPECIFICE TREBUIE SĂ FIE PRIMELE (ÎNAINTE DE /:repoId)
 
-      const { name, description, isPrivate, collaborators } = req.body;
-      const allCollaborators = collaborators && collaborators.length
-        ? [...new Set([userId, ...collaborators])]
-        : [userId];
-
-      const repo = await Repository.create({
-        name,
-        description,
-        isPrivate: isPrivate ?? false,
-        owner: userId,
-        collaborators: allCollaborators,
-      });
-      res.status(201).json(repo);
-    } catch (err) {
-      res.status(500).json({ message: "Server error" });
-    }
+// Rută pentru repository-uri publice
+router.get("/public", async (req: Request, res: Response): Promise<void> => {
+  try {
+    console.log('[RepoView] Fetching public repositories');
+    const repos = await Repository.find({ isPrivate: false })
+      .populate("owner", "name email avatar")
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+    
+    const reposWithStars = repos.map(repo => addStarInfo(repo));
+    res.json(reposWithStars);
+  } catch (error) {
+    console.error('[RepoView] Error fetching public repos:', error);
+    res.status(500).json({ message: "Server error" });
   }
-);
+});
+
+// Rută pentru utilizatori populari (nu repository-uri populare)
+router.get('/popular', async (req: Request, res: Response): Promise<void> => {
+  try {
+    console.log('[RepoView] Fetching popular users');
+    const users = await User.find({})
+      .sort({ followers: -1 })
+      .limit(12)
+      .select('_id name email avatar followers')
+      .lean();
+    for (const user of users) {
+      (user as any).repositories = await Repository.countDocuments({ owner: user._id });
+    }
+    res.json(users);
+  } catch (error) {
+    console.error('[RepoView] Error fetching popular users:', error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 // Listare repo-uri ale userului (owner sau colaborator)
 router.get("/my", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
@@ -132,6 +129,93 @@ router.get("/repositories", authenticateJWT, async (req: Request, res: Response)
   }
 });
 
+router.get("/activity/recent", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" });
+      return;
+    }
+
+    const user = await User.findById(userId).select("following");
+    const followingIds = user?.following ? [...user.following, userId] : [userId];
+
+    const repos = await Repository.find({ owner: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("owner", "email name");
+
+    const starred = await Repository.find({ "starredBy": { $in: followingIds } })
+      .sort({ updatedAt: -1 })
+      .limit(5)
+      .populate("owner", "email name")
+      .populate("starredBy", "email name");
+
+    const prs = await PullRequest.find({ author: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("author", "email name")
+      .populate("repository", "name");
+
+    const commits = await Commit.find({ author: { $in: followingIds } })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("author", "email name")
+      .populate("repository", "name");
+
+    res.json({
+      repos,
+      starred,
+      prs,
+      commits,
+    });
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Creează un repository nou
+router.post(
+  "/new",
+  authenticateJWT,
+  [
+    body("name").notEmpty().withMessage("Name is required"),
+    body("description").optional().isString(),
+    body("isPrivate").optional().isBoolean(),
+    body("collaborators").optional().isArray(),
+  ],
+  async (req: Request, res: Response): Promise<void> => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        res.status(401).json({ message: "User not authenticated" });
+        return;
+      }
+
+      const { name, description, isPrivate, collaborators } = req.body;
+      const allCollaborators = collaborators && collaborators.length
+        ? [...new Set([userId, ...collaborators])]
+        : [userId];
+
+      const repo = await Repository.create({
+        name,
+        description,
+        isPrivate: isPrivate ?? false,
+        owner: userId,
+        collaborators: allCollaborators,
+      });
+      res.status(201).json(repo);
+    } catch (err) {
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 // Marchează/demarchează stea pe repo
 router.post("/star/:id", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -157,7 +241,7 @@ router.post("/star/:id", authenticateJWT, async (req: Request, res: Response): P
     if (hasStar) {
       repo.starredBy = repo.starredBy.filter((id: any) => id.toString() !== userId);
     } else {
-      repo.starredBy.push(userObjectId); // Convert to ObjectId
+      repo.starredBy.push(userObjectId);
     }
     await repo.save();
     res.json({ starred: !hasStar, stars: repo.starredBy.length });
@@ -165,6 +249,8 @@ router.post("/star/:id", authenticateJWT, async (req: Request, res: Response): P
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// Pull request routes - TOATE RUTELE CU /:repoId LA ÎNCEPUT
 
 // Adaugă fișier nou (doar colaboratori/owner)
 router.post("/:repoId/files", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
@@ -218,7 +304,6 @@ router.get("/:repoId/files", authenticateJWToptional, async (req: Request, res: 
     }
 
     let files = [];
-    // Trimite content pentru toți (vizualizare cod), dar doar colaboratorii pot edita din frontend
     if (isCollaborator) {
       files = await File.find({ repository: repoId, branch })
         .select("name author createdAt content")
@@ -371,57 +456,6 @@ router.get("/:repoId/pull", authenticateJWT, async (req: Request, res: Response)
   }
 });
 
-// Vizualizare repo (public: oricine vede, privat: doar colaboratori/owner)
-router.get("/:repoId", authenticateJWToptional, async (req: Request, res: Response): Promise<void> => {
-  const start = Date.now();
-  try {
-    const repoId = req.params.repoId;
-    const userId = getUserId(req);
-    console.log(`[RepoView] Start request for repo ${repoId}`);
-
-    const repo = await Repository.findById(repoId)
-      .populate("owner", "name email avatar")
-      .lean();
-    if (!repo) {
-      console.log(`[RepoView] Repo not found`);
-      res.status(404).json({ message: "Not found" });
-      return;
-    }
-
-    const isCollaborator = isUserCollaborator(repo, req);
-    if (repo.isPrivate && !isCollaborator) {
-      console.log(`[RepoView] Access denied for user ${userId || "anon"}`);
-      res.status(403).json({ message: "You do not have access to this repository" });
-      return;
-    }
-
-    let files = [];
-    const branch = req.query.branch || "main";
-    const filesStart = Date.now();
-    if (isCollaborator) {
-      files = await File.find({ repository: repoId, branch })
-        .select("name author createdAt content")
-        .lean();
-    } else {
-      files = await File.find({ repository: repoId, branch })
-        .limit(20)
-        .select("name author createdAt content")
-        .lean();
-    }
-    console.log(`[RepoView] Files query took ${Date.now() - filesStart} ms, files.length=${files.length}`);
-
-    res.json({
-      ...repo,
-      files,
-      isCollaborator,
-    });
-    console.log(`[RepoView] Total request took ${Date.now() - start} ms`);
-  } catch (err) {
-    console.log(`[RepoView] ERROR:`, err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
 // Pull request routes (doar colaboratori/owner)
 router.post("/:repoId/pull-request", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -444,11 +478,9 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req: Request, res: 
       return;
     }
 
-    // Generează diff simplu între sourceBranch și targetBranch
     const sourceFiles = await File.find({ repository: repoId, branch: sourceBranch }).lean();
     const targetFiles = await File.find({ repository: repoId, branch: targetBranch }).lean();
 
-    // Creează un map pentru targetFiles pentru acces rapid
     const targetMap = new Map(targetFiles.map(f => [f.name, f.content]));
 
     let diff = '';
@@ -461,9 +493,7 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req: Request, res: 
         diff += `--- Old content ---\n${targetContent}\n`;
         diff += `--- New content ---\n${file.content}\n`;
       }
-      // Dacă fișierul există și e identic, nu adăuga nimic
     }
-    // Fișiere șterse
     const sourceNames = new Set(sourceFiles.map(f => f.name));
     for (const file of targetFiles) {
       if (!sourceNames.has(file.name)) {
@@ -478,7 +508,7 @@ router.post("/:repoId/pull-request", authenticateJWT, async (req: Request, res: 
       author: userId,
       title,
       description,
-      diff, // <-- salvează diff-ul aici
+      diff,
     });
     res.status(201).json(pr);
   } catch {
@@ -658,80 +688,6 @@ router.delete("/:repoId/file", authenticateJWT, async (req: Request, res: Respon
   }
 });
 
-router.get("/public", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const repos = await Repository.find({ isPrivate: false })
-      .populate("owner", "name email avatar")
-      .lean();
-    
-    const reposWithStars = repos.map(repo => addStarInfo(repo));
-    res.json(reposWithStars);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-router.get('/popular', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const users = await User.find({})
-      .sort({ followers: -1 })
-      .limit(12)
-      .select('_id name email avatar followers')
-      .lean();
-    for (const user of users) {
-      (user as any).repositories = await Repository.countDocuments({ owner: user._id });
-    }
-    res.json(users);
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-router.get("/activity/recent", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) {
-      res.status(401).json({ message: "User not authenticated" });
-      return;
-    }
-
-    const user = await User.findById(userId).select("following");
-    const followingIds = user?.following ? [...user.following, userId] : [userId];
-
-    const repos = await Repository.find({ owner: { $in: followingIds } })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .populate("owner", "email name");
-
-    const starred = await Repository.find({ "starredBy": { $in: followingIds } })
-      .sort({ updatedAt: -1 })
-      .limit(5)
-      .populate("owner", "email name")
-      .populate("starredBy", "email name");
-
-    const prs = await PullRequest.find({ author: { $in: followingIds } })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .populate("author", "email name")
-      .populate("repository", "name");
-
-    const commits = await Commit.find({ author: { $in: followingIds } })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .populate("author", "email name")
-      .populate("repository", "name");
-
-    res.json({
-      repos,
-      starred,
-      prs,
-      commits,
-    });
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
 router.get('/:repoId/lang-stats', authenticateJWToptional, async (req: Request, res: Response): Promise<void> => {
   try {
     const repoId = req.params.repoId;
@@ -751,12 +707,10 @@ router.post('/:repoId/ai-review', authenticateJWT, async (req: Request, res: Res
       return;
     }
 
-    // Prompt pentru Mistral
     const prompt = `Analyze this code diff and return feedback on potential bugs, performance, and best practices.\n\n${diff}`;
 
-    // Trimite la Mistral local (API compatibil OpenAI)
     const mistralRes = await axios.post('http://127.0.0.1:11434/v1/chat/completions', {
-      model: "mistral", // sau modelul tău
+      model: "mistral",
       messages: [
         { role: "system", content: "You are a senior code reviewer." },
         { role: "user", content: prompt }
@@ -767,7 +721,6 @@ router.post('/:repoId/ai-review', authenticateJWT, async (req: Request, res: Res
 
     const aiFeedback = mistralRes.data.choices?.[0]?.message?.content || "No feedback.";
 
-    // Salvează feedback-ul AI în PullRequest
     await PullRequest.findByIdAndUpdate(prId, { aiFeedback });
 
     res.json({ feedback: aiFeedback });
@@ -882,7 +835,6 @@ router.post("/pull-request/:prId/comment", authenticateJWT, async (req: Request,
       return;
     }
 
-    // Verifică dacă userul e colaborator sau owner pe repo
     const repo = await Repository.findById(pr.repository);
     if (!repo || !isUserCollaborator(repo, req)) {
       res.status(403).json({ message: "You do not have permission to comment on this PR" });
@@ -915,6 +867,67 @@ router.get("/pull-request/:prId/comments", authenticateJWToptional, async (req: 
       .populate("author", "name email avatar");
     res.json(comments);
   } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// 🎯 VIZUALIZARE REPO - ACEASTĂ RUTĂ TREBUIE SĂ FIE ULTIMĂ!
+// Vizualizare repo (public: oricine vede, privat: doar colaboratori/owner)
+router.get("/:repoId", authenticateJWToptional, async (req: Request, res: Response): Promise<void> => {
+  const start = Date.now();
+  try {
+    const repoId = req.params.repoId;
+    const userId = getUserId(req);
+    console.log(`[RepoView] Start request for repo ${repoId}`);
+
+    // Verifică dacă ID-ul este valid ObjectId
+    if (!repoId.match(/^[0-9a-fA-F]{24}$/)) {
+      console.log(`[RepoView] Invalid ObjectId: ${repoId}`);
+      res.status(400).json({ message: "Invalid repository ID" });
+      return;
+    }
+
+    const repo = await Repository.findById(repoId)
+      .populate("owner", "name email avatar")
+      .lean();
+    if (!repo) {
+      console.log(`[RepoView] Repo not found`);
+      res.status(404).json({ message: "Repository not found" });
+      return;
+    }
+
+    const isCollaborator = isUserCollaborator(repo, req);
+    if (repo.isPrivate && !isCollaborator) {
+      console.log(`[RepoView] Access denied for user ${userId || "anon"}`);
+      res.status(403).json({ message: "You do not have access to this repository" });
+      return;
+    }
+
+    let files = [];
+    const branch = req.query.branch || "main";
+    const filesStart = Date.now();
+    if (isCollaborator) {
+      files = await File.find({ repository: repoId, branch })
+        .select("name author createdAt content")
+        .lean();
+    } else {
+      files = await File.find({ repository: repoId, branch })
+        .limit(20)
+        .select("name author createdAt content")
+        .lean();
+    }
+    console.log(`[RepoView] Files query took ${Date.now() - filesStart} ms, files.length=${files.length}`);
+
+    const repoWithStars = addStarInfo(repo, userId);
+
+    res.json({
+      ...repoWithStars,
+      files,
+      isCollaborator,
+    });
+    console.log(`[RepoView] Total request took ${Date.now() - start} ms`);
+  } catch (err) {
+    console.log(`[RepoView] ERROR:`, err);
     res.status(500).json({ message: "Server error" });
   }
 });

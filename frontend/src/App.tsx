@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ChakraProvider } from '@chakra-ui/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext'; // 👈 ADAUGĂ ACEST IMPORT
 import RepositoryViewPage from './pages/RepositoryViewPage';
 import StarredRepositoriesPage from './pages/StarredRepositoriesPage';
 import UserProfilePage from './pages/UserProfilePage';
@@ -30,6 +31,7 @@ function App() {
   return (
     <ChakraProvider>
       <AuthProvider>
+        <NotificationProvider> 
         <Router>
           <ConditionalNavbar />
           <Routes>
@@ -64,6 +66,7 @@ function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </Router>
+           </NotificationProvider> 
       </AuthProvider>
     </ChakraProvider>
   );
