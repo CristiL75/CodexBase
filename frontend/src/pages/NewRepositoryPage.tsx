@@ -21,13 +21,20 @@ import {
 import { FaLock, FaUnlock, FaUserPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
+type UserResult = {
+  _id: string;
+  name: string;
+  email: string;
+  avatar?: string;
+};
+
 const NewRepositoryPage: React.FC = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [collaborators, setCollaborators] = useState<string[]>([]);
   const [searchUser, setSearchUser] = useState('');
-  const [userResults, setUserResults] = useState<any[]>([]);
+  const [userResults, setUserResults] = useState<UserResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const toast = useToast();
