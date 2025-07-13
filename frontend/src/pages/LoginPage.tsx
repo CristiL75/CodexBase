@@ -29,7 +29,7 @@ const LoginPage: React.FC = () => {
   const [tempToken, setTempToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [require2FASetup, setRequire2FASetup] = useState(false);
+  // const [require2FASetup, setRequire2FASetup] = useState(false);
 
   // Pentru regenerare QR
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -79,7 +79,7 @@ const LoginPage: React.FC = () => {
       if (data.require2FA || data.require2FASetup) {
       setShow2FA(true);
       setTempToken(data.tempToken);
-      setRequire2FASetup(!!data.require2FASetup); // <-- adaugă asta
+      // setRequire2FASetup(!!data.require2FASetup); // <-- adaugă asta
       setLoading(false);
       return;
     }
@@ -96,7 +96,7 @@ const LoginPage: React.FC = () => {
 
       setError('Unexpected response from server');
       setLoading(false);
-    } catch (err) {
+    } catch {
       setError('Login failed');
       setLoading(false);
     }
@@ -143,7 +143,7 @@ const LoginPage: React.FC = () => {
         setError(data.message || 'Invalid 2FA code');
       }
       setLoading(false);
-    } catch (err) {
+    } catch {
       setError('2FA verification failed');
       setLoading(false);
     }
@@ -306,16 +306,16 @@ const LoginPage: React.FC = () => {
                         </VStack>
                       </form>
                       {show2FA && (
-  <Button
-    colorScheme="orange"
-    variant="outline"
-    onClick={handleRegenerate2FAQr}
-    isLoading={loading}
-    mt={4}
-  >
-    Regenerate 2FA QR Code
-  </Button>
-)}
+                      <Button
+                        colorScheme="orange"
+                        variant="outline"
+                        onClick={handleRegenerate2FAQr}
+                        isLoading={loading}
+                        mt={4}
+                      >
+                        Regenerate 2FA QR Code
+                      </Button>
+                    )}
                       {showQR && qrUrl && (
                         <Box textAlign="center" mt={4}>
                           <Text mb={2}>Scan this QR code with your authenticator app:</Text>
