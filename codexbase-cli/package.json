@@ -1,0 +1,24 @@
+{
+  "name": "codexbase-cli",
+  "version": "1.0.0",
+  "description": "CodexBase command line interface for repository actions (add, commit, push, pull, clone)",
+  "main": "index.js",
+  "bin": {
+    "codexbase": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cli",
+    "codexbase",
+    "git-like",
+    "repository"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^14.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}
