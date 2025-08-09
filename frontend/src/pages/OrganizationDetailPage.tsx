@@ -3,6 +3,8 @@ import {
   Box, Heading, Text, List, ListItem, Spinner, Divider, Button, Input, HStack, useToast, Badge, VStack, List as ChakraList
 } from "@chakra-ui/react";
 import { useParams, Link as RouterLink } from "react-router-dom";
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 export default function OrganizationDetailPage() {
   const { orgId } = useParams();
@@ -18,23 +20,38 @@ export default function OrganizationDetailPage() {
   const [searchRepo, setSearchRepo] = useState("");
   const toast = useToast();
 
-  const token = localStorage.getItem("token");
-  const userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
+  // Remove this line since we'll use authenticatedFetch
+  // const token = localStorage.getItem("token");
+  const { user } = useAuth();
+  const userId = user?.id || '';
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/organization/${orgId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
-      .then(res => res.json())
-      .then(data => { setOrg(data); setLoading(false); });
+    const fetchOrganization = async () => {
+      try {
+        const response = await authenticatedFetch(`/organization/${orgId}`);
+        const data = await response.json();
+        setOrg(data);
+      } catch (error) {
+        console.error('Error fetching organization:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchOrganization();
   }, [orgId]);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/repositories`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
-      .then(res => res.json())
-      .then(data => setRepos(data));
+    const fetchRepositories = async () => {
+      try {
+        const response = await authenticatedFetch('/repository/repositories');
+        const data = await response.json();
+        setRepos(data);
+      } catch (error) {
+        console.error('Error fetching repositories:', error);
+        setRepos([]);
+      }
+    };
+    fetchRepositories();
   }, []);
 
   useEffect(() => {
@@ -44,18 +61,22 @@ export default function OrganizationDetailPage() {
         setShowSuggestions(false);
         return;
       }
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/find`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({ query: inviteEmail }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserSuggestions(data.users || []);
-        setShowSuggestions(true);
+      try {
+        const response = await authenticatedFetch('/user/find', {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query: inviteEmail }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setUserSuggestions(data.users || []);
+          setShowSuggestions(true);
+        }
+      } catch (error) {
+        console.error('Error searching users:', error);
+        setUserSuggestions([]);
       }
     };
     search();
@@ -65,40 +86,50 @@ export default function OrganizationDetailPage() {
     setInviteLoading(true);
     let user = userObj;
     if (!user) {
-      const userRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/by-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({ email: inviteEmail }),
-      });
-      user = await userRes.json();
+      try {
+        const userRes = await authenticatedFetch('/user/by-email', {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email: inviteEmail }),
+        });
+        user = await userRes.json();
+      } catch (error) {
+        console.error('Error finding user by email:', error);
+      }
     }
     if (!user?._id) {
       toast({ title: "User not found", status: "error" });
       setInviteLoading(false);
       return;
     }
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/${orgId}/invite`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      body: JSON.stringify({ userId: user._id }),
-    });
-    if (res.ok) {
-      toast({ title: "User invited!", status: "success" });
-      setInviteEmail("");
-      setUserSuggestions([]);
-      setShowSuggestions(false);
-      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/organization/${orgId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-      })
-        .then(res => res.json())
-        .then(data => setOrg(data));
-    } else {
+    try {
+      const response = await authenticatedFetch(`/org-invitation/${orgId}/invite`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId: user._id }),
+      });
+      if (response.ok) {
+        toast({ title: "User invited!", status: "success" });
+        setInviteEmail("");
+        setUserSuggestions([]);
+        setShowSuggestions(false);
+        // Refresh organization data
+        try {
+          const orgResponse = await authenticatedFetch(`/organization/${orgId}`);
+          const orgData = await orgResponse.json();
+          setOrg(orgData);
+        } catch (err) {
+          console.error('Error refreshing org data:', err);
+        }
+      } else {
+        toast({ title: "Invite failed", status: "error" });
+      }
+    } catch (error) {
+      console.error('Error inviting user:', error);
       toast({ title: "Invite failed", status: "error" });
     }
     setInviteLoading(false);

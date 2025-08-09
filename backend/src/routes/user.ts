@@ -20,7 +20,39 @@ router.get('/profile', authenticateJWT, async (req: any, res) => {
       return;
     }
 
+    // Calculează contoarele reale direct din baza de date
     const repoCount = await Repository.countDocuments({ owner: user._id });
+    const commitCount = await Commit.countDocuments({ author: user._id });
+    const lastCommit = await Commit.findOne({ author: user._id })
+      .sort({ createdAt: -1 })
+      .select('createdAt');
+
+    console.log(`🔄 [PROFILE] User ${user.email} - Current: repos=${user.repositories}, commits=${user.commits}`);
+    console.log(`🔄 [PROFILE] Real counts: repos=${repoCount}, commits=${commitCount}`);
+
+    // Actualizează user-ul cu contoarele corecte dacă sunt diferite
+    if (user.repositories !== repoCount || user.commits !== commitCount) {
+      console.log(`🔄 [PROFILE] UPDATING counters for user ${user.email}: repos ${user.repositories} -> ${repoCount}, commits ${user.commits} -> ${commitCount}`);
+      
+      try {
+        const updateResult = await User.findByIdAndUpdate(user._id, {
+          repositories: repoCount,
+          commits: commitCount,
+          lastCommitAt: lastCommit?.createdAt || user.lastCommitAt
+        }, { new: true });
+        console.log(`🔄 [PROFILE] Update successful. New values: repos=${updateResult?.repositories}, commits=${updateResult?.commits}`);
+        
+        user.repositories = repoCount;
+        user.commits = commitCount;
+        if (lastCommit?.createdAt) {
+          user.lastCommitAt = lastCommit.createdAt;
+        }
+      } catch (updateError) {
+        console.error(`🔄 [PROFILE] Update failed:`, updateError);
+      }
+    } else {
+      console.log(`🔄 [PROFILE] Counters are already correct, no update needed`);
+    }
 
     res.json({
       _id: user._id,
@@ -37,9 +69,10 @@ router.get('/profile', authenticateJWT, async (req: any, res) => {
       lastCommitAt: user.lastCommitAt,
       commits: user.commits,
       dailyCommitLimit: user.dailyCommitLimit,
-      repositories: repoCount
+      repositories: user.repositories
     });
-  } catch {
+  } catch (error) {
+    console.error('Error in profile route:', error);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -75,6 +108,37 @@ router.patch('/profile', authenticateJWT, async (req: any, res) => {
       repositories: await Repository.countDocuments({ owner: user._id })
     });
   } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Force update counters for current user
+router.post('/force-update-counters', authenticateJWT, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    console.log(`🔄 [FORCE-UPDATE] Starting forced update for user ${userId}`);
+
+    // Calculează contoarele reale
+    const repoCount = await Repository.countDocuments({ owner: userId });
+    const commitCount = await Commit.countDocuments({ author: userId });
+    
+    console.log(`🔄 [FORCE-UPDATE] Real counts: repos=${repoCount}, commits=${commitCount}`);
+
+    // Actualizează forțat
+    const updateResult = await User.findByIdAndUpdate(userId, {
+      repositories: repoCount,
+      commits: commitCount
+    }, { new: true });
+
+    console.log(`🔄 [FORCE-UPDATE] Update completed. New values: repos=${updateResult?.repositories}, commits=${updateResult?.commits}`);
+
+    res.json({ 
+      message: "Counters force updated", 
+      repositories: updateResult?.repositories,
+      commits: updateResult?.commits 
+    });
+  } catch (error) {
+    console.error('🔄 [FORCE-UPDATE] Error:', error);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -365,6 +429,47 @@ router.get("/:userId/activity", authenticateJWT, async (req, res) => {
     res.json({ commits, recentRepos });
   } catch {
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Rută pentru a sincroniza contoarele pentru toți userii (admin only sau debug)
+router.post('/sync-counters', authenticateJWT, async (req: any, res) => {
+  try {
+    console.log('🔄 [SYNC] Starting user counters synchronization...');
+    
+    const users = await User.find({});
+    console.log(`🔄 [SYNC] Found ${users.length} users to sync`);
+    
+    for (const user of users) {
+      // Calculează numărul real de repositories
+      const repoCount = await Repository.countDocuments({ owner: user._id });
+      
+      // Calculează numărul real de commits
+      const commitCount = await Commit.countDocuments({ author: user._id });
+      
+      // Găsește ultimul commit
+      const lastCommit = await Commit.findOne({ author: user._id })
+        .sort({ createdAt: -1 })
+        .select('createdAt');
+      
+      // Actualizează user-ul
+      await User.findByIdAndUpdate(user._id, {
+        repositories: repoCount,
+        commits: commitCount,
+        lastCommitAt: lastCommit?.createdAt || user.lastCommitAt
+      });
+      
+      console.log(`🔄 [SYNC] Updated user ${user.email}: repos=${repoCount}, commits=${commitCount}`);
+    }
+    
+    console.log('✅ [SYNC] Synchronization completed');
+    res.json({ 
+      message: 'Counters synchronized successfully',
+      usersUpdated: users.length 
+    });
+  } catch (error) {
+    console.error('❌ [SYNC] Error:', error);
+    res.status(500).json({ message: "Server error during synchronization" });
   }
 });
 

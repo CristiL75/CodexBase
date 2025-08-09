@@ -4,6 +4,7 @@ import {
 } from "@chakra-ui/react";
 import { Link } from "react-router-dom";
 import { FaStar, FaBook, FaPlus, FaGithub, FaUsers, FaHistory, FaFire, FaChevronRight } from "react-icons/fa";
+import { authenticatedFetch } from '../utils/tokenManager';
 
 const ExplorePage: React.FC = () => {
   interface Repo {
@@ -141,16 +142,8 @@ const ExplorePage: React.FC = () => {
     const fetchActivity = async () => {
       setLoadingActivity(true);
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/repository/activity/recent`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-        const data = await res.json();
+        const response = await authenticatedFetch("/repository/activity/recent");
+        const data = await response.json();
         setActivity(data);
       } catch {
         setActivity(null);

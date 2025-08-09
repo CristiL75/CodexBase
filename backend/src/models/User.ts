@@ -7,6 +7,8 @@ export interface IUser extends Document {
   name: string;
   avatar?: string;
   jwtToken?: string;
+  refreshToken?: string;
+  refreshTokenExpiresAt?: Date;
 
   passwordHash?: string;
   authMethod: "google" | "local";
@@ -43,6 +45,8 @@ const UserSchema = new Schema<IUser>({
   authMethod: { type: String, enum: ["google", "local"], required: true },
 
   jwtToken: { type: String },
+  refreshToken: { type: String },
+  refreshTokenExpiresAt: { type: Date },
 
   is2FAEnabled: { type: Boolean, default: false },
   twoFASecret: { type: String },

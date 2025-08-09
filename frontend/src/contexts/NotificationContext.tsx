@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 interface NotificationContextType {
   notificationCount: number;
@@ -25,26 +26,18 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const { isAuthenticated } = useAuth();
   const [notificationCount, setNotificationCount] = useState(0);
 
-  const fetchNotificationCount = async () => {
+  const fetchNotificationCount = useCallback(async () => {
     if (!isAuthenticated) {
       setNotificationCount(0);
       return;
     }
 
     try {
-      const token = localStorage.getItem('token');
-      
-      // Fetch all notifications in parallel
+      // Fetch all notifications in parallel using authenticatedFetch
       const [resInv, resOrgInv, resFollow] = await Promise.all([
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/my`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/my-follows`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
+        authenticatedFetch('/invitation/my'),
+        authenticatedFetch('/org-invitation/my'),
+        authenticatedFetch('/user/my-follows')
       ]);
 
       const [dataInv, dataOrgInv, dataFollow] = await Promise.all([
@@ -63,7 +56,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       console.error('Error fetching notification count:', error);
       setNotificationCount(0);
     }
-  };
+  }, [isAuthenticated]);
 
   const refreshNotifications = () => {
     fetchNotificationCount();
@@ -74,14 +67,11 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     if (!isAuthenticated) return;
 
     try {
-      const token = localStorage.getItem('token');
-      
       console.log('Marking all notifications as read...');
       
       // Marchează toate notificările ca citite pe server
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/mark-all-notifications-read`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await authenticatedFetch('/user/mark-all-notifications-read', {
+        method: 'POST'
       });
 
       if (response.ok) {
@@ -113,7 +103,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     } else {
       setNotificationCount(0);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchNotificationCount]);
 
   return (
     <NotificationContext.Provider value={{ notificationCount, refreshNotifications, markAsRead }}>

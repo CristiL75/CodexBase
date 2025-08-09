@@ -6,7 +6,6 @@ import {
   Flex,
   Avatar,
   Badge,
-  Button,
   Spinner,
   SimpleGrid,
   HStack,
@@ -14,45 +13,69 @@ import {
   useColorModeValue,
   Tooltip,
 } from '@chakra-ui/react';
-import { FaLock, FaUnlock, FaStar, FaUser } from 'react-icons/fa';
+import { FaLock, FaUnlock, FaStar } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
+
+type User = {
+  _id: string;
+  name: string;
+  avatar?: string;
+};
+
+type Repository = {
+  _id: string;
+  name: string;
+  description?: string;
+  isPrivate: boolean;
+  isStarred?: boolean;
+  owner?: User;
+  stars: number;
+  collaborators?: User[];
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 const RepositoriesPage: React.FC = () => {
-  const [repos, setRepos] = useState<any[]>([]);
+  const [repos, setRepos] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isAuthenticated } = useAuth();
   const cardBg = useColorModeValue('white', 'gray.800');
   const cardBorder = useColorModeValue('gray.200', 'gray.700');
+  const pageBg = useColorModeValue('gray.50', 'gray.900');
 
   useEffect(() => {
-  const fetchRepos = async () => {
-    setLoading(true);
-    const token = localStorage.getItem('token');
-    console.log('Fetching repositories with token:', token);
-    if (!token) {
-      setRepos([]);
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (res.status === 401) {
+    const fetchRepos = async () => {
+      setLoading(true);
+      
+      if (!isAuthenticated) {
         setRepos([]);
-      } else {
-        const data = await res.json();
-        setRepos(data);
+        setLoading(false);
+        return;
       }
-    } catch {
-      setRepos([]);
-    }
-    setLoading(false);
-  };
-  fetchRepos();
-}, []);
+
+      try {
+        const response = await authenticatedFetch(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          setRepos(data);
+        } else {
+          setRepos([]);
+        }
+      } catch (error) {
+        console.error('Error fetching repositories:', error);
+        setRepos([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRepos();
+  }, [isAuthenticated]);
 
   if (loading) {
     return (
@@ -63,7 +86,7 @@ const RepositoriesPage: React.FC = () => {
   }
 
   return (
-    <Box minH="100vh" w="100vw" bg={useColorModeValue('gray.50', 'gray.900')} py={10} px={0}>
+    <Box minH="100vh" w="100vw" bg={pageBg} py={10} px={0}>
       <Box maxW="1200px" mx="auto">
         <Heading mb={8}>Your Repositories</Heading>
         {repos.length === 0 ? (
@@ -119,7 +142,7 @@ const RepositoriesPage: React.FC = () => {
                   <Text fontSize="sm" fontWeight="bold" mb={1}>Collaborators:</Text>
                   <HStack spacing={2}>
                     {repo.collaborators && repo.collaborators.length > 0 ? (
-                      repo.collaborators.map((user: any) => (
+                      repo.collaborators.map((user: User) => (
                         <Tooltip key={user._id} label={user.name}>
                           <Avatar size="xs" src={user.avatar} name={user.name} />
                         </Tooltip>

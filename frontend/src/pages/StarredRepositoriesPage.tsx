@@ -15,30 +15,22 @@ import {
 } from '@chakra-ui/react';
 import { FaLock, FaUnlock, FaStar } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 const StarredRepositoriesPage: React.FC = () => {
   const [repos, setRepos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const cardBg = useColorModeValue('white', 'gray.800');
   const cardBorder = useColorModeValue('gray.200', 'gray.700');
+  const pageBg = useColorModeValue('gray.50', 'gray.900');
 
   useEffect(() => {
     const fetchRepos = async () => {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setRepos([]);
-        setLoading(false);
-        return;
-      }
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/my`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-        const data = await res.json();
+        const response = await authenticatedFetch('/repository/my');
+        const data = await response.json();
         // Filtrare doar repo-urile cu isStarred === true
         setRepos(data.filter((repo: any) => repo.isStarred));
       } catch {
@@ -58,7 +50,7 @@ const StarredRepositoriesPage: React.FC = () => {
   }
 
   return (
-    <Box minH="100vh" w="100vw" bg={useColorModeValue('gray.50', 'gray.900')} py={10} px={0}>
+    <Box minH="100vh" w="100vw" bg={pageBg} py={10} px={0}>
       <Box maxW="1200px" mx="auto">
         <Heading mb={8}>Starred Repositories</Heading>
         {repos.length === 0 ? (

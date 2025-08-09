@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocat
 import { ChakraProvider } from '@chakra-ui/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext'; // 👈 ADAUGĂ ACEST IMPORT
+import { tokenManager } from './utils/tokenManager';
 import RepositoryViewPage from './pages/RepositoryViewPage';
 import StarredRepositoriesPage from './pages/StarredRepositoriesPage';
 import UserProfilePage from './pages/UserProfilePage';
@@ -82,20 +83,36 @@ const ConditionalNavbar: React.FC = () => {
 const AuthCallback: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setToken } = useAuth();
+  const { refreshUserData } = useAuth();
   
   React.useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const token = params.get('token');
-    
-    if (token) {
-      localStorage.setItem('token', token);
-      setToken(token);
-      navigate('/');
-    } else {
-      navigate('/login');
-    }
-  }, [location, navigate, setToken]);
+    const handleOAuthCallback = async () => {
+      const params = new URLSearchParams(location.search);
+      const accessToken = params.get('token');
+      const refreshToken = params.get('refresh');
+      
+      if (accessToken && refreshToken) {
+        try {
+          // Folosește noul token manager pentru a salva tokens
+          tokenManager.setTokens(accessToken, refreshToken);
+          
+          // Actualizează datele utilizatorului în context
+          await refreshUserData();
+          
+          // Redirecționează către home
+          navigate('/');
+        } catch (error) {
+          console.error('Error during OAuth callback:', error);
+          navigate('/login');
+        }
+      } else {
+        // Dacă nu avem tokens, redirecționează către login
+        navigate('/login');
+      }
+    };
+
+    handleOAuthCallback();
+  }, [location, navigate, refreshUserData]);
   
   return <div>Authenticating...</div>;
 };

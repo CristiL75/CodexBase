@@ -4,6 +4,8 @@ import {
 } from "@chakra-ui/react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 
+import { tokenManager } from '../utils/tokenManager';
+
 const RepositoryPullRequestsPage: React.FC = () => {
   const { repoId } = useParams();
   const [prs, setPrs] = useState<any[]>([]);

@@ -1,17 +1,28 @@
 import { useEffect, useState } from "react";
 import { Box, Heading, Button, List, ListItem, Spinner, Text } from "@chakra-ui/react";
 import { Link as RouterLink } from "react-router-dom";
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 export default function OrganizationListPage() {
   const [orgs, setOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/organization/my`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    })
-      .then(res => res.json())
-      .then(data => { setOrgs(data); setLoading(false); });
+    const fetchOrganizations = async () => {
+      try {
+        const response = await authenticatedFetch('/organization/my');
+        const data = await response.json();
+        setOrgs(data);
+      } catch (error) {
+        console.error('Error fetching organizations:', error);
+        setOrgs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchOrganizations();
   }, []);
 
 return (

@@ -11,13 +11,38 @@ import { getLanguageStats } from '../utils/detectLanguageStats';
 import Comment from "../models/Comment";
 import mongoose from 'mongoose';
 import axios from 'axios';
+import { createSanitizationMiddleware, sanitizeRepositoryData, getDetectedPatterns, containsSensitiveData, maskSensitiveData } from '../utils/uriSanitizer';
+
 
 const router = express.Router();
+
+// Top-level error handler for all repository routes
+import { NextFunction } from "express";
+
+router.use((err: any, req: express.Request, res: express.Response, next: NextFunction) => {
+  console.error('🔧 [BACKEND] Top-level error handler:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ message: 'Internal server error (top-level)', error: err?.message || String(err) });
+  }
+});
+
+// Middleware pentru payload-uri mari (aplicat la toate rutele din repository)
+router.use(express.json({ limit: '100mb' }));
+router.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// Middleware special pentru ruta de commit cu limitări foarte mari
+router.use('/:repoId/commit', express.json({ limit: '200mb' }));
+router.use('/:repoId/commit', express.urlencoded({ limit: '200mb', extended: true }));
+
+// Aplicăm middleware-ul de sanitizare pentru toate rutele
+router.use(createSanitizationMiddleware());
 
 // Helper function to get user ID
 function getUserId(req: Request): string | undefined {
   const user = req.user as any;
-  return user?._id?.toString() || user?.id?.toString();
+  const userId = user?._id?.toString() || user?.id?.toString();
+  console.log('🔧 [BACKEND] getUserId called:', { user, userId });
+  return userId;
 }
 
 // Helper pentru verificare colaborator/owner
@@ -44,9 +69,7 @@ function addStarInfo(repo: any, userId?: string): any {
   return repoObj;
 }
 
-// 🎯 RUTELE SPECIFICE TREBUIE SĂ FIE PRIMELE (ÎNAINTE DE /:repoId)
 
-// Rută pentru repository-uri publice
 router.get("/public", async (req: Request, res: Response): Promise<void> => {
   try {
     console.log('[RepoView] Fetching public repositories');
@@ -198,18 +221,48 @@ router.post(
       }
 
       const { name, description, isPrivate, collaborators } = req.body;
-      const allCollaborators = collaborators && collaborators.length
-        ? [...new Set([userId, ...collaborators])]
+      
+      // Verifică și avertizează despre date sensibile detectate
+      const detectedPatterns: string[] = [];
+      if (name) {
+        const namePatterns = getDetectedPatterns(name);
+        detectedPatterns.push(...namePatterns.map(p => `name: ${p}`));
+      }
+      if (description) {
+        const descPatterns = getDetectedPatterns(description);
+        detectedPatterns.push(...descPatterns.map(p => `description: ${p}`));
+      }
+      
+      // Sanitizează datele (mascarea se face automat prin modelul Mongoose)
+      const sanitizedData = sanitizeRepositoryData({ name, description, isPrivate, collaborators });
+      
+      const allCollaborators = sanitizedData.collaborators && sanitizedData.collaborators.length
+        ? [...new Set([userId, ...sanitizedData.collaborators])]
         : [userId];
 
       const repo = await Repository.create({
-        name,
-        description,
-        isPrivate: isPrivate ?? false,
+        name: sanitizedData.name,
+        description: sanitizedData.description,
+        isPrivate: sanitizedData.isPrivate ?? false,
         owner: userId,
         collaborators: allCollaborators,
       });
-      res.status(201).json(repo);
+      
+      // Actualizează contorul de repositories pentru user
+      await User.findByIdAndUpdate(userId, { 
+        $inc: { repositories: 1 } 
+      });
+      
+      // Returnează răspuns cu avertisment dacă au fost detectate date sensibile
+      if (detectedPatterns.length > 0) {
+        res.status(201).json({
+          ...repo.toObject(),
+          securityWarning: `Sensitive data detected and masked: ${detectedPatterns.join(', ')}`,
+          detectedPatterns
+        });
+      } else {
+        res.status(201).json(repo);
+      }
     } catch (err) {
       res.status(500).json({ message: "Server error" });
     }
@@ -274,13 +327,34 @@ router.post("/:repoId/files", authenticateJWT, async (req: Request, res: Respons
       return;
     }
 
+    // Verifică și avertizează despre date sensibile detectate
+    const detectedPatterns: string[] = [];
+    if (name) {
+      const namePatterns = getDetectedPatterns(name);
+      detectedPatterns.push(...namePatterns.map(p => `filename: ${p}`));
+    }
+    if (content) {
+      const contentPatterns = getDetectedPatterns(content);
+      detectedPatterns.push(...contentPatterns.map(p => `content: ${p}`));
+    }
+
     const file = await File.create({
       repository: repoId,
       name,
       content,
       author: userId,
     });
-    res.status(201).json(file);
+    
+    // Returnează răspuns cu avertisment dacă au fost detectate date sensibile
+    if (detectedPatterns.length > 0) {
+      res.status(201).json({
+        ...file.toObject(),
+        securityWarning: `Sensitive data detected and masked: ${detectedPatterns.join(', ')}`,
+        detectedPatterns
+      });
+    } else {
+      res.status(201).json(file);
+    }
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
@@ -322,49 +396,123 @@ router.get("/:repoId/files", authenticateJWToptional, async (req: Request, res: 
 
 // Commit pe branch (doar colaboratori/owner)
 router.post("/:repoId/commit", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
+  console.log('🔧 [BACKEND] Commit request received for repo:', req.params.repoId);
+  console.log('🔧 [BACKEND] Request body size:', JSON.stringify(req.body).length, 'characters');
+  console.log('🔧 [BACKEND] Request headers:', req.headers['content-type'], req.headers['content-length']);
+      console.log('[Commit] Request received:', {
+        repoId: req.params.repoId,
+        user: req.user,
+        bodyKeys: Object.keys(req.body),
+        body: req.body,
+        headers: req.headers,
+      });
+  
   try {
-    const userId = getUserId(req);
-    if (!userId) {
-      res.status(401).json({ message: "User not authenticated" });
+    // Autentificare cu refreshToken
+    const refreshToken = req.headers["authorization"]?.toString().replace("Bearer ", "") || req.body.refreshToken;
+    if (!refreshToken) {
+      res.status(401).json({ message: "No refresh token provided" });
       return;
     }
+    // Caută user cu refreshToken valid
+    const user = await User.findOne({ refreshToken, refreshTokenExpiresAt: { $gt: new Date() } });
+    if (!user) {
+      res.status(401).json({ message: "Invalid or expired refresh token" });
+      return;
+    }
+    req.user = user;
 
     const { message, files, branch = "main" } = req.body;
+    console.log('🔧 [BACKEND] Request data:', { message, filesCount: files?.length, branch });
+    
     const repoId = req.params.repoId;
+    console.log('🔧 [BACKEND] Looking for repo:', repoId);
+    
     const repo = await Repository.findById(repoId);
+    console.log('🔧 [BACKEND] Repo found:', !!repo);
+    
     if (!repo) {
+      console.log('🔧 [BACKEND] Repository not found - returning 404');
       res.status(404).json({ message: "Repository not found" });
       return;
     }
 
+    console.log('🔧 [BACKEND] Checking collaborator permissions...');
     if (!isUserCollaborator(repo, req)) {
+      console.log('🔧 [BACKEND] User not collaborator - returning 403');
       res.status(403).json({ message: "You do not have permission to modify this repository" });
       return;
     }
 
+    // Verifică și avertizează despre date sensibile în fișiere
+    const detectedPatterns: string[] = [];
+    if (Array.isArray(files)) {
+      files.forEach((file: any, index: number) => {
+        if (file.name) {
+          const namePatterns = getDetectedPatterns(file.name);
+          detectedPatterns.push(...namePatterns.map(p => `file[${index}].name: ${p}`));
+        }
+        if (file.content) {
+          const contentPatterns = getDetectedPatterns(file.content);
+          detectedPatterns.push(...contentPatterns.map(p => `file[${index}].content: ${p}`));
+        }
+      });
+    }
+
     for (const file of files) {
+      console.log('🔧 [BACKEND] Processing file:', file.name, 'size:', file.content?.length || 0);
       await File.findOneAndUpdate(
         { repository: repoId, name: file.name, branch },
         {
           $set: {
             content: file.content,
-            author: userId,
+            author: user._id,
           },
         },
         { upsert: true, new: true }
       );
+      console.log('🔧 [BACKEND] File saved:', file.name);
     }
 
+    console.log('🔧 [BACKEND] Creating commit...');
     const commit = await Commit.create({
       repository: repoId,
       branch,
-      author: userId,
+  author: user._id,
       message,
       files,
     });
-    res.status(201).json(commit);
-  } catch {
-    res.status(500).json({ message: "Server error" });
+    console.log('🔧 [BACKEND] Commit created:', commit._id);
+    
+    // Actualizează contorul de commits și ultima dată a commit-ului pentru user
+  await User.findByIdAndUpdate(user._id, {
+      $inc: { commits: 1 },
+      $set: { lastCommitAt: new Date() }
+    });
+    console.log('🔧 [BACKEND] User commit counter updated');
+    
+    // Returnează răspuns cu avertisment dacă au fost detectate date sensibile
+    if (detectedPatterns.length > 0) {
+      console.log('🔧 [BACKEND] Returning response with security warning');
+      const commitData = commit.toJSON ? commit.toJSON() : commit.toObject();
+      res.status(201).json({
+        ...commitData,
+        securityWarning: `Sensitive data detected and masked: ${detectedPatterns.join(', ')}`,
+        detectedPatterns
+      });
+    } else {
+      console.log('🔧 [BACKEND] Returning successful response');
+      const commitData = commit.toJSON ? commit.toJSON() : commit.toObject();
+      res.status(201).json(commitData);
+    }
+  } catch (error) {
+    console.error('🔧 [BACKEND] Error in commit route:', error);
+    res.status(500).json({ message: "Server error", error: error instanceof Error ? error.message : String(error) });
+      console.error('[Commit] Internal server error:', error);
+      if (error instanceof Error && error.stack) {
+        console.error('[Commit] Error stack:', error.stack);
+      }
+      res.status(500).json({ message: 'Internal server error', error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -835,12 +983,7 @@ router.post("/pull-request/:prId/comment", authenticateJWT, async (req: Request,
       return;
     }
 
-    const repo = await Repository.findById(pr.repository);
-    if (!repo || !isUserCollaborator(repo, req)) {
-      res.status(403).json({ message: "You do not have permission to comment on this PR" });
-      return;
-    }
-
+    // Create the comment
     const comment = await Comment.create({
       prId: pr._id,
       author: userId,
@@ -849,7 +992,9 @@ router.post("/pull-request/:prId/comment", authenticateJWT, async (req: Request,
 
     res.status(201).json(comment);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    console.error('🔧 [BACKEND] Commit ERROR:', err);
+    if (err instanceof Error && err.stack) console.error('🔧 [BACKEND] Commit ERROR STACK:', err.stack);
+    res.status(500).json({ message: "Server error", error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -866,6 +1011,32 @@ router.get("/pull-request/:prId/comments", authenticateJWToptional, async (req: 
       .sort({ createdAt: 1 })
       .populate("author", "name email avatar");
     res.json(comments);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Rută pentru verificarea datelor sensibile (utilitar pentru dezvoltatori)
+router.post("/security/check", authenticateJWT, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { text } = req.body;
+    
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ message: "Text field is required" });
+      return;
+    }
+    
+    const containsSensitive = containsSensitiveData(text);
+    const detectedPatterns = getDetectedPatterns(text);
+    const maskedText = maskSensitiveData(text);
+    
+    res.json({
+      original: text,
+      containsSensitiveData: containsSensitive,
+      detectedPatterns,
+      masked: maskedText,
+      warning: containsSensitive ? "Sensitive data detected and would be masked if saved" : "No sensitive data detected"
+    });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }

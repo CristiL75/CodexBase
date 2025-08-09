@@ -12,7 +12,7 @@ const HomePage: React.FC = () => {
     'linear(to-r, teal.400, teal.600)',
     'linear(to-r, teal.600, teal.800)'
   );
-
+  
   return (
     <Box minH="100vh" w="100vw">
       <Box 

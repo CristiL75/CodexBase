@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Box, Heading, Input, Textarea, Button, Flex } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 export default function OrganizationCreatePage() {
   const [name, setName] = useState("");
@@ -8,16 +10,15 @@ export default function OrganizationCreatePage() {
   const navigate = useNavigate();
 
   const handleCreate = async () => {
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/organization/new`, {
+    const response = await authenticatedFetch('/organization/new', {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
       },
       body: JSON.stringify({ name, description }),
     });
-    if (res.ok) {
-      const org = await res.json();
+    if (response.ok) {
+      const org = await response.json();
       navigate(`/organizations/${org._id}`);
     }
   };

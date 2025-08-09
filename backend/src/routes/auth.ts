@@ -1,3 +1,5 @@
+// --- LOGOUT ---
+// (mutat după declarația router)
 import express, { Request, Response, NextFunction } from "express";
 import passport from "passport";
 import jwt from "jsonwebtoken";
@@ -7,6 +9,14 @@ import { User } from "../models/User";
 import crypto from "crypto";
 import speakeasy from "speakeasy";
 import qrcode from "qrcode";
+import { 
+  generateTokenPair, 
+  verifyAccessToken, 
+  extractTokenFromHeader, 
+  createAuthResponse,
+  isRefreshTokenValid,
+  getRefreshTokenExpiry
+} from "../utils/tokenManager";
 
 const router = express.Router();
 
@@ -18,17 +28,19 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   async (req: any, res: Response) => {
     const user = req.user;
-    const token = jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        is2FAEnabled: user.is2FAEnabled,
-      },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
-    await User.findByIdAndUpdate(user._id, { jwtToken: token });
-    res.redirect(`http://localhost:5173/auth/success?token=${token}`);
+    
+    // Generează noi tokens
+    const tokens = generateTokenPair(user);
+    
+    // Actualizează utilizatorul cu noile tokens
+    await User.findByIdAndUpdate(user._id, { 
+      jwtToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      refreshTokenExpiresAt: getRefreshTokenExpiry()
+    });
+    
+    // Redirecționează cu access token (refresh token va fi trimis separat)
+    res.redirect(`http://localhost:5173/auth/success?token=${tokens.accessToken}&refresh=${tokens.refreshToken}`);
   }
 );
 
@@ -57,7 +69,6 @@ router.post(
       }
 
       const passwordHash = await bcrypt.hash(password, 10);
-
       const newUser = await User.create({
         email,
         name,
@@ -66,16 +77,15 @@ router.post(
         is2FAEnabled: false,
       });
 
-      const tempToken = jwt.sign(
-        { id: newUser._id, email: newUser.email, is2FAEnabled: false, twoFAPending: true },
+      // Generează token clasic pentru user nou
+      const token = jwt.sign(
+        { id: newUser._id, email: newUser.email },
         process.env.JWT_SECRET!,
         { expiresIn: "14h" }
       );
-
-      newUser.jwtToken = tempToken;
+      newUser.jwtToken = token;
       await newUser.save();
-
-      res.json({ require2FASetup: true, tempToken });
+      res.json({ token });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
@@ -110,21 +120,29 @@ router.post(
       }
 
       if (user.is2FAEnabled) {
+        // Pentru 2FA, folosim încă tokens temporare
         const tempToken = jwt.sign(
           { id: user._id, email: user.email, is2FAEnabled: true, twoFAPending: true },
           process.env.JWT_SECRET!,
-          { expiresIn: "14h" }
+          { expiresIn: "10m" }
         );
         res.json({ require2FA: true, tempToken });
         return;
       }
 
-      const tempToken = jwt.sign(
-        { id: user._id, email: user.email, is2FAEnabled: false, twoFAPending: true },
-        process.env.JWT_SECRET!,
-        { expiresIn: "10m" }
-      );
-      res.json({ require2FASetup: true, tempToken });
+      // Pentru utilizatori fără 2FA, generăm tokens complete
+      const tokens = generateTokenPair(user);
+
+      // Actualizează utilizatorul cu noile tokens
+      await User.findByIdAndUpdate(user._id, { 
+        jwtToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        refreshTokenExpiresAt: getRefreshTokenExpiry()
+      });
+
+      // Setează HttpOnly cookies pentru accessToken și refreshToken
+  // Trimite tokenurile direct în răspuns (fără cookies)
+  res.json(createAuthResponse(user, tokens));
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
@@ -134,31 +152,51 @@ router.post(
 
 // --- MIDDLEWARE JWT ---
 export const authenticateJWT = (req: any, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    res.status(401).json({ message: "Missing auth token" });
-    return;
+  console.log(`[AUTH] Header Authorization:`, req.headers.authorization);
+    const authHeader = req.headers.authorization;
+    const token = extractTokenFromHeader(authHeader);
+    console.log(`[AUTH] Token extras:`, token);
+    console.log(`[AUTH] Middleware called for path: ${req.path}, method: ${req.method}`);
+
+
+  
+  console.log(`[Auth] Request to ${req.path} - Headers: ${JSON.stringify(req.headers.authorization ? 'Bearer ***' : 'None')}`);
+  
+  // Special logging for commit requests
+  if (req.path.includes('/commit')) {
+    console.log(`🔧 [AUTH] Commit request intercepted for path: ${req.path}`);
+    console.log(`🔧 [AUTH] Method: ${req.method}`);
+    console.log(`🔧 [AUTH] Token present: ${!!token}`);
   }
-  if (!authHeader.startsWith("Bearer ")) {
-    console.log('Invalid auth header:', authHeader);
-    res.status(401).json({ message: "Invalid auth header" });
-    return;
-  }
-  const token = authHeader.split(" ")[1];
+  
   if (!token) {
-    res.status(401).json({ message: "Invalid auth header" });
+    console.log(`[Auth] No token provided for request to ${req.path}`);
+    res.status(401).json({ 
+      message: "No token provided", 
+      code: "NO_TOKEN" 
+    });
     return;
   }
 
-  jwt.verify(token, process.env.JWT_SECRET!, (err: any, user: any) => {
-    if (err) {
-      console.error('JWT verify error:', err);
-      res.status(403).json({ message: "Invalid token" });
-      return;
-    }
-    req.user = user;
-    next();
-  });
+  const decoded = verifyAccessToken(token);
+  if (!decoded) {
+    console.log(`[Auth] Invalid or expired token for request to ${req.path}. Token: ${token.substring(0, 20)}...`);
+    res.status(401).json({ 
+      message: "Invalid or expired token", 
+      code: "TOKEN_INVALID" 
+    });
+    return;
+  }
+
+  console.log(`[Auth] Token verified successfully for user ${decoded.id} on ${req.path}`);
+  
+  // Special logging for commit requests
+  if (req.path.includes('/commit')) {
+    console.log(`🔧 [AUTH] Commit authentication successful, passing to route handler`);
+  }
+  
+  req.user = decoded;
+  next();
 };
 
 // --- 2FA SETUP ---
@@ -231,15 +269,20 @@ router.post(
         await user.save();
       }
 
-      const jwtToken = jwt.sign(
-        { id: user._id, email: user.email, is2FAEnabled: true },
-        process.env.JWT_SECRET!,
-        { expiresIn: "7d" }
-      );
-      user.jwtToken = jwtToken;
-      await user.save();
+      const tokens = generateTokenPair(user);
+      
+      // Actualizează utilizatorul cu noile tokens
+      await User.findByIdAndUpdate(user._id, { 
+        jwtToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        refreshTokenExpiresAt: getRefreshTokenExpiry()
+      });
 
-      res.json({ success: true, message: "2FA enabled successfully", token: jwtToken });
+      res.json({ 
+        success: true, 
+        message: "2FA enabled successfully", 
+        ...createAuthResponse(user, tokens) 
+      });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "2FA verification failed" });
@@ -270,16 +313,16 @@ router.post("/login/2fa-verify", async (req: Request, res: Response) => {
       return;
     }
 
-    const jwtToken = jwt.sign(
-      { id: user._id, email: user.email, is2FAEnabled: true },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
+    const tokens = generateTokenPair(user);
 
-    user.jwtToken = jwtToken;
-    await user.save();
+    // Actualizează utilizatorul cu noile tokens
+    await User.findByIdAndUpdate(user._id, { 
+      jwtToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      refreshTokenExpiresAt: getRefreshTokenExpiry()
+    });
 
-    res.json({ token: jwtToken });
+    res.json(createAuthResponse(user, tokens));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -359,5 +402,78 @@ export const authenticateJWToptional = async (req: Request, res: Response, next:
   }
   next();
 };
+
+// Refresh token endpoint
+router.post("/refresh", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      res.status(400).json({ 
+        message: "Refresh token is required",
+        code: "REFRESH_TOKEN_REQUIRED" 
+      });
+      return;
+    }
+
+    // Găsește utilizatorul cu acest refresh token
+    const user = await User.findOne({ 
+      refreshToken,
+      refreshTokenExpiresAt: { $gt: new Date() }
+    });
+
+    if (!user) {
+      res.status(401).json({ 
+        message: "Invalid or expired refresh token",
+        code: "REFRESH_TOKEN_INVALID" 
+      });
+      return;
+    }
+
+    // Generează noi tokens
+    const tokens = generateTokenPair(user);
+    
+    // Actualizează refresh token-ul în baza de date
+    user.refreshToken = tokens.refreshToken;
+    user.refreshTokenExpiresAt = getRefreshTokenExpiry();
+    user.jwtToken = tokens.accessToken;
+    await user.save();
+
+    res.json(createAuthResponse(user, tokens));
+  } catch (error) {
+    console.error('[Auth] Refresh token error:', error);
+    res.status(500).json({ 
+      message: "Server error during token refresh",
+      code: "REFRESH_ERROR" 
+    });
+  }
+});
+
+// Logout endpoint (invalidează refresh token)
+router.post("/logout", authenticateJWT, async (req: any, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    
+    // Șterge refresh token-ul și JWT token-ul
+    await User.findByIdAndUpdate(userId, {
+      $unset: { 
+        refreshToken: 1, 
+        refreshTokenExpiresAt: 1,
+        jwtToken: 1 
+      }
+    });
+
+    res.json({ 
+      message: "Successfully logged out",
+      code: "LOGOUT_SUCCESS" 
+    });
+  } catch (error) {
+    console.error('[Auth] Logout error:', error);
+    res.status(500).json({ 
+      message: "Server error during logout",
+      code: "LOGOUT_ERROR" 
+    });
+  }
+});
 
 export default router;

@@ -34,6 +34,8 @@ import {
 } from '@chakra-ui/react';
 import { FaUserFriends, FaStar, FaCodeBranch, FaCalendarAlt, FaUserShield, FaClock, FaEdit } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 const ProfilePage: React.FC = () => {
   const [profile, setProfile] = useState<any>(null);
@@ -47,6 +49,7 @@ const ProfilePage: React.FC = () => {
   const [activityData, setActivityData] = useState<{ date: string, count: number }[]>([]);
   const cardBg = useColorModeValue('white', 'gray.800');
   const cardBorder = useColorModeValue('gray.200', 'gray.700');
+  const pageBg = useColorModeValue('gray.50', 'gray.900');
   const navigate = useNavigate();
   const {
     isOpen: isFollowersOpen,
@@ -64,21 +67,15 @@ const ProfilePage: React.FC = () => {
   const [bioDraft, setBioDraft] = useState('');
   const [bioSaving, setBioSaving] = useState(false);
 
-  // Get logged in user id for edit rights
-  let loggedUserId = '';
-  try {
-    const token = localStorage.getItem('token');
-    loggedUserId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
-  } catch {}
+  // Get auth context
+  const { user } = useAuth();
+  const loggedUserId = user?.id || '';
 
   useEffect(() => {
     const fetchProfile = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await authenticatedFetch('/user/profile');
         const data = await res.json();
         setProfile(data);
         setBioDraft(data.bio || '');
@@ -95,13 +92,7 @@ const ProfilePage: React.FC = () => {
       if (!profile || !profile._id) return;
       setCommitsLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/commits`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const res = await authenticatedFetch(`/user/${profile._id}/commits`);
         const data = await res.json();
         setRecentCommits(data.commits || data || []);
       } catch {
@@ -116,12 +107,8 @@ const ProfilePage: React.FC = () => {
     const fetchActivity = async () => {
       if (!profile || !profile._id) return;
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/activity-calendar`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const data = await res.json();
+        const response = await authenticatedFetch(`/user/${profile._id}/activity-calendar`);
+        const data = await response.json();
         setActivityData(data);
       } catch {
         setActivityData([]);
@@ -134,14 +121,8 @@ const ProfilePage: React.FC = () => {
     if (!profile || !profile._id) return;
     setFollowersLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/followers`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const data = await res.json();
+      const response = await authenticatedFetch(`/user/${profile._id}/followers`);
+      const data = await response.json();
       setFollowersList(data.followers || []);
     } catch {
       setFollowersList([]);
@@ -153,14 +134,8 @@ const ProfilePage: React.FC = () => {
     if (!profile || !profile._id) return;
     setFollowingLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/${profile._id}/following`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const data = await res.json();
+      const response = await authenticatedFetch(`/user/${profile._id}/following`);
+      const data = await response.json();
       setFollowingList(data.following || []);
     } catch {
       setFollowingList([]);
@@ -203,12 +178,10 @@ const ProfilePage: React.FC = () => {
   const handleSaveBio = async () => {
     setBioSaving(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/profile`, {
+      const res = await authenticatedFetch('/user/profile', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ bio: bioDraft }),
       });
@@ -216,7 +189,9 @@ const ProfilePage: React.FC = () => {
         setProfile({ ...profile, bio: bioDraft });
         setIsEditingBio(false);
       }
-    } catch {}
+    } catch {
+      // Handle error silently
+    }
     setBioSaving(false);
   };
 
@@ -238,7 +213,7 @@ const ProfilePage: React.FC = () => {
 
   return (
     <Box
-      bg={useColorModeValue('gray.50', 'gray.900')}
+      bg={pageBg}
       minH="100vh"
       w="100vw"
       px={0}

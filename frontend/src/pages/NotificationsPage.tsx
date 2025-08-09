@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../contexts/NotificationContext';
 import { FaTrash, FaTrashAlt } from 'react-icons/fa';
 import { useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 const NotificationsPage: React.FC = () => {
   const { refreshNotifications } = useNotifications();
@@ -36,15 +38,12 @@ const NotificationsPage: React.FC = () => {
   useEffect(() => {
     const fetchNotifications = async () => {
       setLoading(true);
-      const token = localStorage.getItem('token');
       try {
         console.log('🔍 Fetching notifications...');
 
         // 📋 REPO INVITATIONS - SAFE FETCH
         try {
-          const resInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/my`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const resInv = await authenticatedFetch('/invitation/my');
           if (resInv.ok) {
             const dataInv = await resInv.json();
             console.log('📋 Repo invitations:', dataInv);
@@ -60,9 +59,7 @@ const NotificationsPage: React.FC = () => {
 
         // 🏢 ORG INVITATIONS - SAFE FETCH
         try {
-          const resOrgInv = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/my`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const resOrgInv = await authenticatedFetch('/org-invitation/my');
           if (resOrgInv.ok) {
             const dataOrgInv = await resOrgInv.json();
             console.log('🏢 Org invitations:', dataOrgInv);
@@ -78,9 +75,7 @@ const NotificationsPage: React.FC = () => {
 
         // 👥 FOLLOW NOTIFICATIONS - SAFE FETCH
         try {
-          const resFollow = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/my-follows`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const resFollow = await authenticatedFetch('/user/my-follows');
           if (resFollow.ok) {
             const dataFollow = await resFollow.json();
             console.log('👥 Follow notifications:', dataFollow);
@@ -105,15 +100,10 @@ const NotificationsPage: React.FC = () => {
 
   // 🗑️ ȘTERGE O FOLLOW NOTIFICATION SPECIFICĂ
   const handleDeleteFollowNotification = async (notificationId: string) => {
-    const token = localStorage.getItem('token');
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/follow-notification/${notificationId}`,
-        {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const response = await authenticatedFetch(`/user/follow-notification/${notificationId}`, {
+        method: 'DELETE',
+      });
 
       if (response.ok) {
         console.log(`✅ Follow notification ${notificationId} deleted`);
@@ -132,15 +122,10 @@ const NotificationsPage: React.FC = () => {
   // 🗑️ ȘTERGE TOATE NOTIFICĂRILE (follow + invitations)
   const handleDeleteAllNotifications = async () => {
     setDeletingAll(true);
-    const token = localStorage.getItem('token');
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/mark-all-notifications-read`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const response = await authenticatedFetch('/user/mark-all-notifications-read', {
+        method: 'POST',
+      });
 
       if (response.ok) {
         console.log('✅ All notifications deleted');
@@ -161,16 +146,14 @@ const NotificationsPage: React.FC = () => {
   };
 
   const handleAction = async (id: string, action: "accept" | "decline", type: "repo" | "org") => {
-    const token = localStorage.getItem('token');
     const url =
       type === "repo"
-        ? `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/${id}/${action}`
-        : `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/org-invitation/${id}/${action}`;
+        ? `/invitation/${id}/${action}`
+        : `/org-invitation/${id}/${action}`;
     
     try {
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.ok) {

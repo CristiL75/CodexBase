@@ -20,6 +20,8 @@ import {
 } from '@chakra-ui/react';
 import { FaLock, FaUnlock, FaUserPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 type UserResult = {
   _id: string;
@@ -45,12 +47,8 @@ const NewRepositoryPage: React.FC = () => {
     if (!searchUser) return;
     setSearching(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/search?query=${searchUser}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const data = await res.json();
+      const response = await authenticatedFetch(`/user/search?query=${searchUser}`);
+      const data = await response.json();
       setUserResults(data.users || []);
     } catch {
       setUserResults([]);
@@ -72,23 +70,18 @@ const NewRepositoryPage: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/new`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ name, description, isPrivate, collaborators }),
-        }
-      );
-      if (res.ok) {
+      const response = await authenticatedFetch('/repository/new', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, description, isPrivate, collaborators }),
+      });
+      if (response.ok) {
         toast({ title: "Repository created!", status: "success" });
         navigate('/repositories');
       } else {
-        const data = await res.json();
+        const data = await response.json();
         toast({ title: data.message || "Error creating repository", status: "error" });
       }
     } catch {

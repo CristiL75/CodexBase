@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import axios from 'axios';
+import { tokenManager, authenticatedFetch } from '../utils/tokenManager';
 
 // Definim tipul pentru datele utilizatorului
 interface User {
@@ -21,12 +21,13 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, name: string, password: string) => Promise<void>;
   verify2FA: (token: string) => Promise<void>;
-  setup2FA: () => Promise<{ qrCodeUrl: string; secret: string }>;
+  setup2FA: () => Promise<{ qrCode: string; secret: string }>;
   confirm2FA: (token: string) => Promise<void>;
   disable2FA: (password: string) => Promise<void>;
   generateBackupCodes: () => Promise<string[]>;
   logout: () => void;
   setTemp2FAEmail: (email: string) => void;
+  refreshUserData: () => Promise<void>;
 }
 
 // Creăm contextul
@@ -44,46 +45,63 @@ export const useAuth = () => {
 // Provider pentru context
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [token, setToken] = useState<string | null>(tokenManager.getAccessToken());
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [needs2FAVerification, setNeeds2FAVerification] = useState<boolean>(false);
   const [tempEmail, setTempEmail] = useState<string | null>(null);
 
   // URL de bază API
-  const API_URL = 'http://localhost:5000'; // 👈 ACTUALIZAT URL-ul pentru backend-ul tău
-
-  // Configurare axios cu token
-  useEffect(() => {
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    } else {
-      delete axios.defaults.headers.common['Authorization'];
-    }
-  }, [token]);
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
   // Verificare token la încărcare
   useEffect(() => {
-    const verifyToken = async () => {
-      if (!token) {
+    const initializeAuth = async () => {
+      const accessToken = tokenManager.getAccessToken();
+      if (!accessToken) {
         setLoading(false);
         return;
       }
 
       try {
-        // Aici putem adăuga un endpoint de verificare token dacă există
-        // Pentru acum, setăm doar loading la false
-        setLoading(false);
+        // Verifică dacă token-ul este valid prin încercarea unui request
+        const response = await authenticatedFetch(`${API_URL}/user/profile`);
+        if (response.ok) {
+          const userData = await response.json();
+          
+          // Transform _id to id for compatibility - SAME AS refreshUserData
+          const transformedUser = {
+            ...userData,
+            id: userData._id || userData.id
+          };
+          
+          console.log('🔍 AuthContext initializeAuth:', {
+            originalData: userData,
+            transformedUser: transformedUser,
+            id: transformedUser.id,
+            _id: userData._id
+          });
+          
+          setUser(transformedUser);
+          setToken(accessToken);
+        } else {
+          // Token invalid sau expirat
+          tokenManager.clearTokens();
+          setToken(null);
+          setUser(null);
+        }
       } catch (error) {
         console.error('Error verifying token:', error);
-        localStorage.removeItem('token');
+        tokenManager.clearTokens();
         setToken(null);
-        setLoading(false);
+        setUser(null);
       }
+      
+      setLoading(false);
     };
 
-    verifyToken();
-  }, [token]);
+    initializeAuth();
+  }, [API_URL]);
 
   // Funcție pentru setarea emailului temporar pentru verificare 2FA
   const setTemp2FAEmail = (email: string) => {
@@ -94,11 +112,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Funcție pentru login
   const login = async (email: string, password: string) => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await axios.post(`${API_URL}/auth/login`, { email, password });
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
       
       // Verificăm dacă utilizatorul are 2FA activat
-      if (response.data.needs2FAVerification) {
+      if (data.require2FA) {
         setTemp2FAEmail(email);
         setNeeds2FAVerification(true);
         setLoading(false);
@@ -106,17 +138,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Dacă nu are 2FA sau a trecut deja de verificare
-      localStorage.setItem('token', response.data.token);
-      setToken(response.data.token);
-      setUser({
-        id: response.data.id,
-        email: response.data.email,
-        is2FAEnabled: response.data.is2FAEnabled || false
-      });
+      if (data.accessToken && data.refreshToken) {
+        tokenManager.setTokens(data.accessToken, data.refreshToken);
+        setToken(data.accessToken);
+        
+        // Transform _id to id for compatibility
+        const transformedUser = {
+          ...data.user,
+          id: data.user._id || data.user.id
+        };
+        setUser(transformedUser);
+      }
+      
       setError(null);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'An error occurred during login');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('An error occurred during login');
       }
@@ -128,19 +165,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Funcție pentru înregistrare
   const signup = async (email: string, name: string, password: string) => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await axios.post(`${API_URL}/auth/signup`, { email, name, password });
-      localStorage.setItem('token', response.data.token);
-      setToken(response.data.token);
-      setUser({
-        id: response.data.id,
-        email,
-        name,
-        is2FAEnabled: false
+      const response = await fetch(`${API_URL}/auth/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, name, password }),
       });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Signup failed');
+      }
+
+      // Signup-ul returnează un token temporar pentru setup 2FA
+      if (data.require2FASetup && data.tempToken) {
+        setTemp2FAEmail(email);
+        setNeeds2FAVerification(true);
+        // Setăm token-ul temporar
+        tokenManager.setTokens(data.tempToken, '');
+        setToken(data.tempToken);
+      }
+      
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred during signup');
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An error occurred during signup');
+      }
     } finally {
       setLoading(false);
     }
@@ -154,20 +211,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await axios.post(`${API_URL}/auth/login/2fa-verify`, {
-        email: tempEmail,
-        token
+      const response = await fetch(`${API_URL}/auth/2fa/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenManager.getAccessToken()}`,
+        },
+        body: JSON.stringify({ token }),
       });
 
-      localStorage.setItem('token', response.data.token);
-      setToken(response.data.token);
-      setNeeds2FAVerification(false);
-      setTempEmail(null);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Invalid 2FA code');
+      }
+
+      // După verificarea 2FA, primim tokens complete
+      if (data.accessToken && data.refreshToken) {
+        tokenManager.setTokens(data.accessToken, data.refreshToken);
+        setToken(data.accessToken);
+        
+        // Transform _id to id for compatibility
+        const transformedUser = {
+          ...data.user,
+          id: data.user._id || data.user.id
+        };
+        setUser(transformedUser);
+        setNeeds2FAVerification(false);
+        setTempEmail(null);
+      }
+      
       setError(null);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Invalid 2FA code');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('Invalid 2FA code');
       }
@@ -177,14 +257,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Funcție pentru setare inițială 2FA
-  const setup2FA = async () => {
+  const setup2FA = async (): Promise<{ qrCode: string; secret: string }> => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await axios.post(`${API_URL}/auth/2fa/setup`);
-      return response.data;
+      const response = await authenticatedFetch(`${API_URL}/auth/2fa/setup`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to setup 2FA');
+      }
+
+      const data = await response.json();
+      return { qrCode: data.qrCode, secret: data.secret };
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to setup 2FA');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('Failed to setup 2FA');
       }
@@ -197,15 +288,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Funcție pentru confirmare cod 2FA la setup
   const confirm2FA = async (token: string) => {
     setLoading(true);
+    setError(null);
+    
     try {
-      await axios.post(`${API_URL}/auth/2fa/verify`, { token });
+      const response = await authenticatedFetch(`${API_URL}/auth/2fa/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to verify 2FA code');
+      }
+
+      const data = await response.json();
       
-      // Actualizăm starea user să reflecte activarea 2FA
-      setUser(prev => prev ? {...prev, is2FAEnabled: true} : null);
+      // Actualizăm starea user și tokens după confirmarea 2FA
+      if (data.accessToken && data.refreshToken) {
+        tokenManager.setTokens(data.accessToken, data.refreshToken);
+        setToken(data.accessToken);
+        
+        // Transform _id to id for compatibility
+        const transformedUser = {
+          ...data.user,
+          id: data.user._id || data.user.id
+        };
+        setUser(transformedUser);
+      } else {
+        // Dacă nu primim tokens noi, actualizăm doar user-ul
+        setUser(prev => prev ? {...prev, is2FAEnabled: true} : null);
+      }
+      
       setError(null);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to verify 2FA code');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('Failed to verify 2FA code');
       }
@@ -218,15 +338,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Funcție pentru dezactivare 2FA
   const disable2FA = async (password: string) => {
     setLoading(true);
+    setError(null);
+    
     try {
-      await axios.post(`${API_URL}/auth/2fa/disable`, { password });
+      const response = await authenticatedFetch(`${API_URL}/auth/2fa/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to disable 2FA');
+      }
       
       // Actualizăm starea user să reflecte dezactivarea 2FA
       setUser(prev => prev ? {...prev, is2FAEnabled: false} : null);
       setError(null);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to disable 2FA');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('Failed to disable 2FA');
       }
@@ -237,14 +370,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Funcție pentru generare coduri de backup
-  const generateBackupCodes = async () => {
+  const generateBackupCodes = async (): Promise<string[]> => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await axios.post(`${API_URL}/auth/2fa/generate-backup-codes`);
-      return response.data.backupCodes;
+      const response = await authenticatedFetch(`${API_URL}/auth/2fa/generate-backup-codes`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to generate backup codes');
+      }
+
+      const data = await response.json();
+      return data.backupCodes;
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to generate backup codes');
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
         setError('Failed to generate backup codes');
       }
@@ -255,10 +399,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Funcție pentru logout
-  const logout = () => {
-    localStorage.removeItem('token');
+  const logout = async () => {
+    try {
+      await tokenManager.logout();
+    } catch (error) {
+      console.warn('Logout error:', error);
+    }
     setToken(null);
     setUser(null);
+    setNeeds2FAVerification(false);
+    setTempEmail(null);
+    setError(null);
+  };
+
+  // Funcție pentru actualizarea datelor utilizatorului
+  const refreshUserData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await authenticatedFetch(`${API_URL}/user/profile`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch user data');
+      }
+
+      const data = await response.json();
+      
+      // Transform _id to id for compatibility
+      const transformedUser = {
+        ...data,
+        id: data._id || data.id
+      };
+      
+      console.log('🔍 AuthContext refreshUserData:', {
+        originalData: data,
+        transformedUser: transformedUser,
+        id: transformedUser.id,
+        _id: data._id
+      });
+      
+      setUser(transformedUser);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to fetch user data');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Valoarea pentru context
@@ -267,7 +457,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     token,
     loading,
     error,
-    isAuthenticated: !!token,
+    isAuthenticated: !!token && !!user,
     needs2FAVerification,
     tempEmail,
     login,
@@ -278,7 +468,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     disable2FA,
     generateBackupCodes,
     logout,
-    setTemp2FAEmail
+    setTemp2FAEmail,
+    refreshUserData
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

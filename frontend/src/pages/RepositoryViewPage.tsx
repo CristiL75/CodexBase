@@ -5,6 +5,8 @@ import {
 import { FaFileAlt, FaEdit, FaUpload, FaCodeBranch, FaTerminal, FaCopy, FaChartPie, FaRobot, FaLightbulb, FaUserPlus, FaTimes } from 'react-icons/fa';
 import { useParams } from 'react-router-dom';
 import { useDisclosure } from '@chakra-ui/react';
+import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/tokenManager';
 
 const RepositoryViewPage: React.FC = () => {
   const { repoId } = useParams<{ repoId: string }>();
@@ -50,15 +52,18 @@ const RepositoryViewPage: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // Token for CLI
-  const token = localStorage.getItem('token');
+  // Get auth context
+  const { user, isAuthenticated } = useAuth();
+
+ 
+  // Token for CLI - folosește accessToken din sesiune
+  const token = localStorage.getItem('accessToken');
   const { onCopy, hasCopied } = useClipboard(token || '');
 
   // User id for edit rights
-  let userId = '';
-  try {
-    userId = token ? JSON.parse(atob(token.split('.')[1])).id : '';
-  } catch {}
+  const userId = user?.id || (user as any)?._id || '';
+
+  console.log('🔍 User info:', { user, userId });
 
   // 🎯 INVITE FUNCTIONS DIN CODUL TAU
   // Caută utilizatori după username/email și afișează lista
@@ -68,18 +73,13 @@ const RepositoryViewPage: React.FC = () => {
     if (!value || value.length < 2) return;
     setSearching(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/find`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ query: value }),
-        }
-      );
+      const res = await authenticatedFetch('/user/find', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: value }),
+      });
       const data = await res.json();
       if (res.ok && data.users) {
         setSearchResults(data.users);
@@ -96,18 +96,13 @@ const RepositoryViewPage: React.FC = () => {
   const handleInviteUser = async (userId: string) => {
     setInviteLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const resInvite = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/invitation/${repoId}/invite`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ userId }),
-        }
-      );
+      const resInvite = await authenticatedFetch(`/invitation/${repoId}/invite`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId }),
+      });
       if (resInvite.ok) {
         toast({ title: "User invited!", status: "success" });
         setInviteInput('');
@@ -126,9 +121,7 @@ const RepositoryViewPage: React.FC = () => {
     const fetchLangStats = async () => {
       setLangStatsLoading(true);
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/lang-stats`
-        );
+        const res = await authenticatedFetch(`/repository/${repoId}/lang-stats`);
         const data = await res.json();
         setLangStats(data);
       } catch {
@@ -144,19 +137,25 @@ const RepositoryViewPage: React.FC = () => {
     const fetchRepo = async () => {
       setLoading(true);
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        console.log(`[Frontend] Fetching repository ${repoId}`);
+        const url = `/repository/${repoId}`;
+        console.log(`[Frontend] Full URL: ${url}`);
+        const res = await authenticatedFetch(url);
+        console.log(`[Frontend] Response status: ${res.status}`);
+        console.log(`[Frontend] Response headers:`, Object.fromEntries(res.headers.entries()));
+        
         if (res.ok) {
           const data = await res.json();
+          console.log(`[Frontend] Repository data received:`, data);
           setRepo(data);
         } else {
+          console.error(`[Frontend] Repository fetch failed: ${res.status} ${res.statusText}`);
+          const responseText = await res.text();
+          console.error(`[Frontend] Error response body:`, responseText);
           setRepo(null);
         }
-      } catch {
+      } catch (error) {
+        console.error(`[Frontend] Repository fetch error:`, error);
         setRepo(null);
       }
       setLoading(false);
@@ -164,12 +163,7 @@ const RepositoryViewPage: React.FC = () => {
     const fetchPRs = async () => {
       setPullRequestsLoading(true);
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/pull-requests`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const res = await authenticatedFetch(`/repository/${repoId}/pull-requests`);
         const data = await res.json();
         setPullRequests(Array.isArray(data) ? data : []);
       } catch {
@@ -179,12 +173,7 @@ const RepositoryViewPage: React.FC = () => {
     };
     const fetchBranches = async () => {
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/branches`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const res = await authenticatedFetch(`/repository/${repoId}/branches`);
         let data = await res.json();
         if (!Array.isArray(data) || data.length === 0) {
           data = ['main'];
@@ -208,12 +197,7 @@ const RepositoryViewPage: React.FC = () => {
   useEffect(() => {
     const fetchFiles = async () => {
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const res = await authenticatedFetch(`/repository/${repoId}/files?branch=${selectedBranch}`);
         const data = await res.json();
         setFiles(data);
       } catch {
@@ -224,12 +208,7 @@ const RepositoryViewPage: React.FC = () => {
     const fetchCommits = async () => {
       setCommitsLoading(true);
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const res = await authenticatedFetch(`/repository/${repoId}/commits?branch=${selectedBranch}`);
         const data = await res.json();
         setCommits(data);
       } catch {
@@ -262,33 +241,19 @@ const RepositoryViewPage: React.FC = () => {
   const handleDeleteFile = async (fileName: string) => {
     if (!window.confirm(`Are you sure you want to delete "${fileName}" from branch "${selectedBranch}"?`)) return;
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/file`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ name: fileName, branch: selectedBranch }),
-        }
-      );
+      const res = await authenticatedFetch(`/repository/${repoId}/file`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: fileName, branch: selectedBranch }),
+      });
       if (res.ok) {
         toast({ title: "File deleted!", status: "success" });
         // Refresh files and commits
-        const filesRes = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const filesRes = await authenticatedFetch(`/repository/${repoId}/files?branch=${selectedBranch}`);
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const commitsRes = await authenticatedFetch(`/repository/${repoId}/commits?branch=${selectedBranch}`);
         setCommits(await commitsRes.json());
       } else {
         toast({ title: "Error deleting file", status: "error" });
@@ -305,46 +270,120 @@ const RepositoryViewPage: React.FC = () => {
 
   // Upload file and commit
   const handleUploadAndCommit = async () => {
+    console.log('🔧 Starting upload process...', { selectedFile, commitMessage });
+    
     if (!selectedFile || !commitMessage) {
       toast({ title: "Select a file and enter a commit message!", status: "warning" });
       return;
     }
+    
+    // Check file size (50MB limit for testing - increased from 10MB)
+    const maxSize = 50 * 1024 * 1024; // 50MB in bytes
+    console.log('🔧 File size check:', { 
+      fileSize: selectedFile.size, 
+      maxSize, 
+      fileSizeMB: (selectedFile.size / 1024 / 1024).toFixed(1),
+      fileSizeKB: (selectedFile.size / 1024).toFixed(1)
+    });
+    
+    if (selectedFile.size > maxSize) {
+      toast({ 
+        title: "File too large!", 
+        description: `File size is ${(selectedFile.size / 1024 / 1024).toFixed(1)}MB. Maximum allowed is 50MB for testing.`,
+        status: "error" 
+      });
+      return;
+    }
+    
     setUploading(true);
     try {
+      console.log('🔧 Reading file content...');
       const fileText = await selectedFile.text();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commit`, {
+      console.log('🔧 File content read:', { 
+        contentLength: fileText.length,
+        fileName: selectedFile.name,
+        firstChars: fileText.substring(0, 100) + '...'
+      });
+      
+      const requestBody = {
+        message: commitMessage,
+        files: [{ name: selectedFile.name, content: fileText }],
+        branch: selectedBranch,
+      };
+      
+      console.log('🔧 Making request to:', `/repository/${repoId}/commit`);
+      console.log('🔧 Request body structure:', {
+        message: requestBody.message,
+        filesCount: requestBody.files.length,
+        fileName: requestBody.files[0].name,
+        contentSize: requestBody.files[0].content.length,
+        branch: requestBody.branch
+      });
+      
+      const jsonBody = JSON.stringify(requestBody);
+      const jsonSizeBytes = new Blob([jsonBody]).size;
+      const jsonSizeMB = (jsonSizeBytes / 1024 / 1024).toFixed(2);
+      
+      console.log('🔧 JSON payload size:', {
+        bytes: jsonSizeBytes,
+        mb: jsonSizeMB,
+        isLargePayload: jsonSizeBytes > 50 * 1024 * 1024
+      });
+      
+
+      // Folosește accessToken din localStorage pentru commit (CLI și API)
+      const accessToken = localStorage.getItem('accessToken');
+      const commitUrl = `/repository/${repoId}/commit`;
+      console.log('[Commit] URL:', commitUrl);
+      const res = await authenticatedFetch(commitUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          'Authorization': `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({
-          message: commitMessage,
-          files: [{ name: selectedFile.name, content: fileText }],
-          branch: selectedBranch,
-        }),
+        body: JSON.stringify(requestBody),
+      });
+      
+      console.log('🔧 Upload response:', { 
+        status: res.status, 
+        statusText: res.statusText,
+        ok: res.ok 
       });
       if (res.ok) {
-        toast({ title: "File uploaded & committed!", status: "success" });
+        const responseData = await res.json();
+        console.log('🔧 Upload response data:', responseData);
+        
+        // Check if there are security warnings
+        if (responseData.securityWarning) {
+          toast({ 
+            title: "File uploaded with security warning!", 
+            description: responseData.securityWarning,
+            status: "warning",
+            duration: 6000,
+            isClosable: true
+          });
+        } else {
+          toast({ title: "File uploaded & committed!", status: "success" });
+        }
+        
         setSelectedFile(null);
         setCommitMessage('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const filesRes = await authenticatedFetch(`/repository/${repoId}/files?branch=${selectedBranch}`);
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const commitsRes = await authenticatedFetch(`/repository/${repoId}/commits?branch=${selectedBranch}`);
         setCommits(await commitsRes.json());
       } else {
+        const errorText = await res.text();
+        console.log('🔧 Upload failed with error:', { 
+          status: res.status, 
+          statusText: res.statusText,
+          errorText 
+        });
         toast({ title: "Error uploading file", status: "error" });
       }
-    } catch {
+    } catch (error) {
+      console.log('🔧 Upload caught exception:', error);
       toast({ title: "Server error", status: "error" });
     }
     setUploading(false);
@@ -357,6 +396,34 @@ const RepositoryViewPage: React.FC = () => {
       (c?._id?.toString?.() || c?.toString?.() || c) === userId
     ))
   );
+
+  // Debug logs for ownership
+  console.log('🔍 Ownership check:', {
+    userId,
+    repoOwner: repo?.owner,
+    repoOwnerId: repo?.owner?._id?.toString?.() || repo?.owner?.toString?.() || repo?.owner,
+    canEdit,
+    isOwner: repo && ((repo.owner?._id?.toString?.() || repo.owner?.toString?.() || repo.owner) === userId),
+    collaborators: repo?.collaborators,
+    repo: repo,
+    user: user
+  });
+  localStorage.getItem('token');
+        console.log(localStorage.getItem('token'));
+  
+  console.log('🔍 Detailed comparison:', {
+    'userId (from user.id)': userId,
+    'repo.owner': repo?.owner,
+    'repo.owner._id': repo?.owner?._id,
+    'repo.owner._id.toString()': repo?.owner?._id?.toString?.(),
+    'Are they equal?': (repo?.owner?._id?.toString?.() || repo?.owner?.toString?.() || repo?.owner) === userId,
+    'typeof userId': typeof userId,
+    'typeof repoOwnerId': typeof (repo?.owner?._id?.toString?.() || repo?.owner?.toString?.() || repo?.owner),
+    'canEdit': canEdit,
+    'repo exists': !!repo,
+    'userId exists': !!userId,
+    'user object': user
+  });
   const handleOpenEdit = (file: any) => {
     setEditingFile(file);
     setEditingContent(file.content);
@@ -366,11 +433,10 @@ const RepositoryViewPage: React.FC = () => {
     if (!editingFile) return;
     setEditingLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commit`, {
+      const res = await authenticatedFetch(`/repository/${repoId}/commit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           message: `Edit ${editingFile.name}`,
@@ -383,17 +449,9 @@ const RepositoryViewPage: React.FC = () => {
         setEditingFile(null);
         setEditingContent('');
         // Refresh files and commits
-        const filesRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/files?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const filesRes = await authenticatedFetch(`/repository/${repoId}/files?branch=${selectedBranch}`);
         setFiles(await filesRes.json());
-        const commitsRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/commits?branch=${selectedBranch}`,
-          token
-            ? { headers: { Authorization: `Bearer ${token}` } }
-            : undefined
-        );
+        const commitsRes = await authenticatedFetch(`/repository/${repoId}/commits?branch=${selectedBranch}`);
         setCommits(await commitsRes.json());
       } else {
         toast({ title: "Error updating file", status: "error" });
@@ -426,11 +484,10 @@ const RepositoryViewPage: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-review`, {
+      const res = await authenticatedFetch(`/repository/${repoId}/ai-review`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ diff: pr.diff || pr.diffText, prId: pr._id }),
       });
@@ -451,11 +508,10 @@ const RepositoryViewPage: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-summary`, {
+      const res = await authenticatedFetch(`/repository/${repoId}/ai-summary`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ diff: pr.diff || pr.diffText || '', prId: pr._id }),
       });
@@ -472,11 +528,10 @@ const RepositoryViewPage: React.FC = () => {
     setAiExplainFile(file);
     setAiExplain(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-explain-file`, {
+      const res = await authenticatedFetch(`/repository/${repoId}/ai-explain-file`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ fileContent: file.content, fileName: file.name }),
       });
@@ -492,11 +547,10 @@ const RepositoryViewPage: React.FC = () => {
     setAiCommitMsgLoading(true);
     setAiCommitMsg(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/${repoId}/ai-commit-message`, {
+      const res = await authenticatedFetch(`/repository/${repoId}/ai-commit-message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ diff }),
       });
@@ -511,10 +565,7 @@ const RepositoryViewPage: React.FC = () => {
   const fetchComments = async (prId: string) => {
     setCommentsLoading(prev => ({ ...prev, [prId]: true }));
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${prId}/comments`,
-        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
-      );
+      const res = await authenticatedFetch(`/repository/pull-request/${prId}/comments`);
       const data = await res.json();
       setComments(prev => ({ ...prev, [prId]: Array.isArray(data) ? data : [] }));
     } catch {
@@ -528,13 +579,12 @@ const RepositoryViewPage: React.FC = () => {
     const content = commentInputs[prId]?.trim();
     if (!content) return;
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${prId}/comment`,
+      const res = await authenticatedFetch(
+        `/repository/pull-request/${prId}/comment`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ content }),
         }
@@ -833,9 +883,9 @@ const RepositoryViewPage: React.FC = () => {
                     colorScheme="teal"
                     onClick={async () => {
                       try {
-                        const res = await fetch(
-                          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/merge`,
-                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                        const res = await authenticatedFetch(
+                          `/repository/pull-request/${pr._id}/merge`,
+                          { method: "POST" }
                         );
                         if (res.ok) {
                           toast({ title: "Pull request merged!", status: "success" });
@@ -856,9 +906,9 @@ const RepositoryViewPage: React.FC = () => {
                     variant="outline"
                     onClick={async () => {
                       try {
-                        const res = await fetch(
-                          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/repository/pull-request/${pr._id}/close`,
-                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                        const res = await authenticatedFetch(
+                          `/repository/pull-request/${pr._id}/close`,
+                          { method: "POST" }
                         );
                         if (res.ok) {
                           toast({ title: "Pull request closed!", status: "info" });
@@ -904,6 +954,18 @@ const RepositoryViewPage: React.FC = () => {
           </ModalContent>
         </Modal>
 
+        {/* DEBUG INFO */}
+        {!canEdit && (
+          <Box p={4} bg="red.50" border="1px solid" borderColor="red.200" borderRadius="md" mb={4}>
+            <Text fontWeight="bold" color="red.600">🐛 DEBUG: Upload not available</Text>
+            <Text fontSize="sm" color="red.500">canEdit: {canEdit ? 'true' : 'false'}</Text>
+            <Text fontSize="sm" color="red.500">userId: "{userId}"</Text>
+            <Text fontSize="sm" color="red.500">repo exists: {repo ? 'true' : 'false'}</Text>
+            <Text fontSize="sm" color="red.500">repo.owner._id: "{repo?.owner?._id}"</Text>
+            <Text fontSize="sm" color="red.500">user.id: "{user?.id}"</Text>
+          </Box>
+        )}
+
         {/* Drag & Drop Upload and Commit */}
         {canEdit && (
           <>
@@ -926,8 +988,11 @@ const RepositoryViewPage: React.FC = () => {
               <Icon as={FaUpload} boxSize={8} color="teal.400" mb={2} />
               <Text>
                 {selectedFile
-                  ? `Selected file: ${selectedFile.name}`
+                  ? `Selected file: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(1)}MB)`
                   : "Drag and drop a file here, or click to select"}
+              </Text>
+              <Text fontSize="xs" color="gray.500" mt={1}>
+                Maximum file size: 50MB (increased for testing)
               </Text>
               <Input
                 ref={inputRef}
@@ -946,7 +1011,10 @@ const RepositoryViewPage: React.FC = () => {
                 />
                 <Button
                   colorScheme="teal"
-                  onClick={handleUploadAndCommit}
+                  onClick={() => {
+                    console.log('🎯 Upload button clicked!');
+                    handleUploadAndCommit();
+                  }}
                   isLoading={uploading}
                 >
                   Commit File
@@ -1216,7 +1284,7 @@ const RepositoryViewPage: React.FC = () => {
                 w="100%"
                 display="block"
               >
-                {`codexbase login ${token}`}
+                {token ? `codexbase login ${token}` : "Autentifică-te pentru a primi tokenul CLI"}
               </Code>
             </Box>
             <Button

@@ -4,12 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "dev": "nodemon src/index.ts",
-  "start": "node src/index.js",
-  "test": "jest --detectOpenHandles --forceExit",
-  "test:watch": "jest --watch --detectOpenHandles",
-  "test:coverage": "jest --coverage --detectOpenHandles --forceExit"
-},
+    "dev": "nodemon src/index.ts",
+    "start": "node src/index.js",
+    "build": "tsc",
+    "test": "jest --detectOpenHandles --forceExit",
+    "test:watch": "jest --watch --detectOpenHandles",
+    "test:coverage": "jest --coverage --detectOpenHandles --forceExit",
+    "test-security": "npm run build && node tests/testSecurity.js",
+    "test-security-ts": "ts-node tests/uriSanitizer.test.ts"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
