@@ -75,7 +75,7 @@ const LoginPage: React.FC = () => {
       if (data.token) {
         localStorage.setItem('token', data.token);
         // Dacă ai context de autentificare, decomentează linia de mai jos
-        // setToken(data.token);
+        setToken(data.token);
         navigate('/');
         setLoading(false);
         return;
@@ -219,3 +219,6 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
+function setToken(token: string) {
+  localStorage.setItem('token', token);
+}
