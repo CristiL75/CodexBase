@@ -408,29 +408,22 @@ router.post("/:repoId/commit", authenticateJWT, async (req: Request, res: Respon
       });
   
   try {
-    // Autentificare cu refreshToken
-    const refreshToken = req.headers["authorization"]?.toString().replace("Bearer ", "") || req.body.refreshToken;
-    if (!refreshToken) {
-      res.status(401).json({ message: "No refresh token provided" });
-      return;
-    }
-    // Caută user cu refreshToken valid
-    const user = await User.findOne({ refreshToken, refreshTokenExpiresAt: { $gt: new Date() } });
+    // Userul este deja setat de authenticateJWT (access token JWT)
+    const user = req.user;
     if (!user) {
-      res.status(401).json({ message: "Invalid or expired refresh token" });
+      res.status(401).json({ message: "User not authenticated" });
       return;
     }
-    req.user = user;
 
     const { message, files, branch = "main" } = req.body;
     console.log('🔧 [BACKEND] Request data:', { message, filesCount: files?.length, branch });
-    
+
     const repoId = req.params.repoId;
     console.log('🔧 [BACKEND] Looking for repo:', repoId);
-    
+
     const repo = await Repository.findById(repoId);
     console.log('🔧 [BACKEND] Repo found:', !!repo);
-    
+
     if (!repo) {
       console.log('🔧 [BACKEND] Repository not found - returning 404');
       res.status(404).json({ message: "Repository not found" });
@@ -466,7 +459,7 @@ router.post("/:repoId/commit", authenticateJWT, async (req: Request, res: Respon
         {
           $set: {
             content: file.content,
-            author: user._id,
+            author: getUserId(req),
           },
         },
         { upsert: true, new: true }
@@ -478,19 +471,19 @@ router.post("/:repoId/commit", authenticateJWT, async (req: Request, res: Respon
     const commit = await Commit.create({
       repository: repoId,
       branch,
-  author: user._id,
+      author: getUserId(req),
       message,
       files,
     });
     console.log('🔧 [BACKEND] Commit created:', commit._id);
-    
+
     // Actualizează contorul de commits și ultima dată a commit-ului pentru user
-  await User.findByIdAndUpdate(user._id, {
+    await User.findByIdAndUpdate(getUserId(req), {
       $inc: { commits: 1 },
       $set: { lastCommitAt: new Date() }
     });
     console.log('🔧 [BACKEND] User commit counter updated');
-    
+
     // Returnează răspuns cu avertisment dacă au fost detectate date sensibile
     if (detectedPatterns.length > 0) {
       console.log('🔧 [BACKEND] Returning response with security warning');
@@ -508,11 +501,9 @@ router.post("/:repoId/commit", authenticateJWT, async (req: Request, res: Respon
   } catch (error) {
     console.error('🔧 [BACKEND] Error in commit route:', error);
     res.status(500).json({ message: "Server error", error: error instanceof Error ? error.message : String(error) });
-      console.error('[Commit] Internal server error:', error);
-      if (error instanceof Error && error.stack) {
-        console.error('[Commit] Error stack:', error.stack);
-      }
-      res.status(500).json({ message: 'Internal server error', error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof Error && error.stack) {
+      console.error('[Commit] Error stack:', error.stack);
+    }
   }
 });
 

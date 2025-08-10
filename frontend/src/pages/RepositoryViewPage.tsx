@@ -307,7 +307,7 @@ const RepositoryViewPage: React.FC = () => {
       
       const requestBody = {
         message: commitMessage,
-        files: [{ name: selectedFile.name, content: fileText }],
+        files: [{ name: selectedFile.name, content: fileText, path: selectedFile.name }],
         branch: selectedBranch,
       };
       
@@ -333,6 +333,7 @@ const RepositoryViewPage: React.FC = () => {
 
       // Folosește accessToken din localStorage pentru commit (CLI și API)
       const accessToken = localStorage.getItem('accessToken');
+      console.log("token",accessToken);
       const commitUrl = `/repository/${repoId}/commit`;
       console.log('[Commit] URL:', commitUrl);
       const res = await authenticatedFetch(commitUrl, {
@@ -345,7 +346,8 @@ const RepositoryViewPage: React.FC = () => {
       });
       
       console.log('🔧 Upload response:', { 
-        status: res.status, 
+        status: res.status,
+     
         statusText: res.statusText,
         ok: res.ok 
       });
@@ -381,6 +383,7 @@ const RepositoryViewPage: React.FC = () => {
           errorText 
         });
         toast({ title: "Error uploading file", status: "error" });
+         console.log("token",accessToken);
       }
     } catch (error) {
       console.log('🔧 Upload caught exception:', error);
